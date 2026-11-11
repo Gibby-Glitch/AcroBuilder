@@ -1,6 +1,12 @@
-<meta name="claude:viewport-fit-sides" content="cover">
-<title>Acro Score Builder</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ducks 2026-2027 Season</title>
 <style>
+[hidden]{display:none !important;}
+
 /* Layout: sticky top nav (level/round tabs) over a single scrolling column of cards;
    each card is a self-contained "skill picker" widget reused across Optional/Team. */
 :root{
@@ -41,7 +47,7 @@ button{font-family:inherit; cursor:pointer;}
   border-bottom:1px solid var(--border);
 }
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg);}
-.brand{display:flex; align-items:baseline; gap:8px; margin-bottom:10px;}
+.brand{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
 .brand h1{font-size:19px;}
 .brand span{color:var(--fg-dim); font-size:12px;}
 .tabrow{display:flex; gap:6px; flex-wrap:wrap;}
@@ -138,20 +144,162 @@ textarea.exportbox{
 @media print{
   .topbar,.ghostbtn,.removebtn,select,input,.athletepicker{display:none !important;}
 }
+
+.syncbadge{
+  margin-left:auto; font-size:11px; font-weight:700; letter-spacing:.02em; text-transform:uppercase;
+  padding:3px 9px; border-radius:999px; background:var(--surface-2); color:var(--fg-dim); border:1px solid var(--border);
+}
+.syncbadge.live{background:var(--good); color:var(--accent-fg); border-color:var(--good);}
+.syncbadge.err{background:var(--bad); color:var(--accent-fg); border-color:var(--bad);}
+.brand{position:relative;}
+
+.accessgate{
+  position:fixed; inset:0; z-index:100; background:var(--bg); display:flex; align-items:center; justify-content:center;
+  padding:16px;
+}
+.accessbox{
+  background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px 24px; max-width:320px; width:100%;
+  text-align:center;
+}
+.accessbox h2{font-size:18px; margin-bottom:8px;}
+.accessbox p{font-size:13px; color:var(--fg-dim); margin-bottom:16px;}
+.accessbox input{margin-bottom:10px; text-align:center;}
+.accesserror{color:var(--bad); font-size:12.5px; margin-top:10px;}
+
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-
+</head>
+<body>
 <div class="topbar">
-  <div class="brand"><h1>Acro Score Builder</h1><span>Level Acro Jr/Sr Team</span></div>
+  <div class="brand"><h1>Ducks 2026-2027 Season</h1><span>Acro Score Builder — Level 3/4</span><span id="syncBadge" class="syncbadge">Local only</span></div>
   <div class="tabrow" id="roundTabs"></div>
   <div class="subrow" id="levelPills"></div>
 </div>
 
+<div id="accessGate" class="accessgate" hidden>
+  <div class="accessbox">
+    <h2>Team Access</h2>
+    <p>Enter your team's access code to continue.</p>
+    <input type="password" id="accessInput" placeholder="Access code" autocomplete="off">
+    <button id="accessBtn" class="ghostbtn" type="button">Enter</button>
+    <div id="accessError" class="accesserror" hidden>Incorrect code — try again.</div>
+  </div>
+</div>
+
 <main id="app"></main>
 
+
+<!-- Firebase (only used if FIREBASE_CONFIG below is filled in - see README.md) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 (function(){
 "use strict";
+
+/* ================= Live sync (Firebase Firestore) =================
+   Fill in FIREBASE_CONFIG below (from your Firebase project settings) to make
+   this page sync in real time across every device that opens it - iPad,
+   laptop, whatever. Leave it as null and the page works exactly as before:
+   each device keeps its own local copy only (localStorage), no sync.
+   Setup steps are in README.md. */
+var FIREBASE_CONFIG = null;
+/* Example:
+var FIREBASE_CONFIG = {
+  apiKey: "AIza...",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "...",
+  appId: "..."
+};
+*/
+var SYNC_DOC_PATH = ["acroScoreBuilder", "sharedTeam"]; // collection, doc id - one shared sheet for this team
+
+var fbDocRef = null, fbReady = false, fbWriteTimer = null, fbLastPushedJSON = null, fbApplyingRemote = false;
+
+function setSyncBadge(mode){
+  var b = document.getElementById("syncBadge");
+  if(!b) return;
+  b.classList.remove("live","err");
+  if(mode==="live"){ b.textContent="Synced live"; b.classList.add("live"); }
+  else if(mode==="connecting"){ b.textContent="Connecting…"; }
+  else if(mode==="err"){ b.textContent="Sync error"; b.classList.add("err"); }
+  else { b.textContent="Local only"; }
+}
+
+function fbInit(){
+  if(!FIREBASE_CONFIG){ setSyncBadge("local"); return; }
+  if(typeof firebase === "undefined"){ setSyncBadge("err"); return; }
+  try{
+    setSyncBadge("connecting");
+    firebase.initializeApp(FIREBASE_CONFIG);
+    var db = firebase.firestore();
+    fbDocRef = db.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1]);
+    fbDocRef.onSnapshot(function(snap){
+      fbReady = true;
+      setSyncBadge("live");
+      if(!snap.exists) return;
+      var remote = snap.data();
+      if(!remote) return;
+      var remoteJSON = JSON.stringify(remote.data||{});
+      if(remoteJSON === fbLastPushedJSON) return; // our own write echoing back - ignore
+      fbApplyingRemote = true;
+      state.data = remote.data || {};
+      state.uid = remote.uid || state.uid;
+      try{ renderAll(); }catch(e){}
+      fbApplyingRemote = false;
+    }, function(err){
+      console.warn("Sync listen failed:", err);
+      setSyncBadge("err");
+    });
+  }catch(e){
+    console.warn("Firebase init failed:", e);
+    setSyncBadge("err");
+  }
+}
+
+function fbPush(){
+  if(!fbDocRef || fbApplyingRemote) return;
+  clearTimeout(fbWriteTimer);
+  fbWriteTimer = setTimeout(function(){
+    var payload = { data: state.data, uid: state.uid, _updatedAt: Date.now() };
+    fbLastPushedJSON = JSON.stringify(payload.data);
+    fbDocRef.set(payload).catch(function(e){ console.warn("Sync push failed:", e); setSyncBadge("err"); });
+  }, 500);
+}
+
+/* ================= Simple team access code =================
+   Not real security (the code lives in this file's source), but keeps the
+   page from being casually opened or edited by someone who doesn't have the
+   code. Set to "" (empty string) to turn the gate off entirely. */
+var ACCESS_CODE = "DUCKS2027"; // change this to whatever code you want your team to use
+var ACCESS_STORAGE_KEY = "acroAccessUnlocked_v1";
+
+function checkAccess(){
+  var gate = document.getElementById("accessGate");
+  if(!gate) return;
+  var unlocked = false;
+  try{ unlocked = localStorage.getItem(ACCESS_STORAGE_KEY) === "1"; }catch(e){}
+  if(!ACCESS_CODE || unlocked){ gate.hidden = true; return; }
+  gate.hidden = false;
+  var input = document.getElementById("accessInput");
+  var btn = document.getElementById("accessBtn");
+  var errBox = document.getElementById("accessError");
+  function tryUnlock(){
+    if(input.value === ACCESS_CODE){
+      try{ localStorage.setItem(ACCESS_STORAGE_KEY, "1"); }catch(e){}
+      gate.hidden = true;
+    } else {
+      errBox.hidden = false;
+      input.value = "";
+      input.focus();
+    }
+  }
+  btn.addEventListener("click", tryUnlock);
+  input.addEventListener("keydown", function(e){ if(e.key==="Enter") tryUnlock(); });
+  input.focus();
+}
+
 
 /* ---------------- Data ---------------- */
 var ATHLETES = ["Amanda Barker","Charlee Beasley","Corabel Blancett","Angelique Butler","Nia Centeno",
@@ -262,6 +410,7 @@ function load(){
 }
 function save(){
   try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid})); }catch(e){}
+  fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
 function getBucket(path){
@@ -359,6 +508,36 @@ function roleExport(rec, key, label){
   return label+":"+(rec[key+"_na"] ? "N/A" : "["+(rec[key]||[]).join(", ")+"]");
 }
 
+/* Lets a coach enter a skill/value that isn't in the chart yet, bypassing the
+   normal lookup entirely. Returns the toggle+fields block; call render() again
+   (passed as renderFn) whenever the checkbox or value changes so the scoreline updates. */
+function customOverrideField(rec, renderFn){
+  rec.custom = !!rec.custom;
+  rec.customName = rec.customName || "";
+  rec.customValue = (rec.customValue===undefined || rec.customValue===null) ? "" : rec.customValue;
+  var wrap = el("div",{});
+  var cbLine = el("label",{class:"checkline"});
+  var cb = el("input",{type:"checkbox"}); cb.checked = rec.custom;
+  cb.addEventListener("change", function(){ rec.custom = cb.checked; save(); renderFn(); });
+  cbLine.appendChild(cb); cbLine.appendChild(document.createTextNode(" Skill/score not listed — enter manually"));
+  wrap.appendChild(cbLine);
+  if(rec.custom){
+    var row = el("div",{class:"row"});
+    var nameInput = el("input",{type:"text", placeholder:"e.g. Full-Twisting Layout"}); nameInput.value = rec.customName;
+    nameInput.addEventListener("input", function(){ rec.customName = nameInput.value; save(); });
+    var valInput = el("input",{type:"number", step:"0.1", placeholder:"e.g. 9.6"}); valInput.value = rec.customValue;
+    valInput.addEventListener("input", function(){ rec.customValue = valInput.value; save(); renderFn(); });
+    row.appendChild(field("Custom skill name", nameInput));
+    row.appendChild(field("Score / bonus value", valInput));
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+function customNumericValue(rec){
+  var v = parseFloat(rec.customValue);
+  return isNaN(v) ? 0 : v;
+}
+
 /* ---------------- Acro skill picker (Hand Support / Walk-Pitch-Toss / Punk) ---------------- */
 function acroSkillCard(rec, onRemove, title, onUpdate){
   rec.family = rec.family || "wpt";
@@ -373,10 +552,19 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
   function render(){
     card.innerHTML = "";
     card.appendChild(el("h3",{},[title||"Acro Element"]));
+    card.appendChild(customOverrideField(rec, render));
+
+    var pts=0, breakdown=[], finalValue=0, scoreLabel="";
+
+    if(rec.custom){
+      finalValue = customNumericValue(rec);
+      breakdown = ["Custom skill: "+(rec.customName||"(unnamed)")];
+      scoreLabel = "Custom value";
+    } else {
     var famSel = selectEl([["hs","Hand Support / Hand-to-Hand"],["wpt","Walk, Pitch & Toss"],["punk","Punk Move"]], rec.family, function(v){ rec.family=v; render(); save(); });
     card.appendChild(el("div",{class:"row"},[ field("Skill family", famSel) ]));
 
-    var entryMap, topMap, dismMap, pts=0, breakdown=[];
+    var entryMap, topMap, dismMap;
     var gpEntry = GROUP_PTS[rec.entryGroup], gpTop = GROUP_PTS[rec.topGroup], gpDismount = GROUP_PTS[rec.dismountGroup];
 
     if(rec.family==="hs"){ entryMap=HS_ENTRY; topMap=HS_TOP; dismMap=HS_DISMOUNT; }
@@ -449,6 +637,11 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
       else breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gpEntry,"Top (Reverse Punk Popover) "+PUNK_TOP[rec.top]+" +grp "+gpTop,"Dismount: use 1-1 Hand Support chart (solo +2)"];
     }
 
+    var cat = diffCategory(pts);
+    finalValue = cat[3];
+    scoreLabel = "Total points "+pts+" → "+cat[2];
+    } // end !rec.custom
+
     var roleRow = el("div",{class:"row"});
     roleRow.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
     roleRow.appendChild(rolePicker(rec, "frontBase", "Front Base"));
@@ -456,11 +649,10 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
     roleRow.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
     card.appendChild(roleRow);
 
-    var cat = diffCategory(pts);
-    rec._value = cat[3];
+    rec._value = finalValue;
     var sl = el("div",{class:"scoreline"},[
-      el("span",{class:"lbl"},["Total points "+pts+" → "+cat[2]]),
-      el("span",{class:"val"},["+"+cat[3].toFixed(1)])
+      el("span",{class:"lbl"},[scoreLabel]),
+      el("span",{class:"val"},["+"+finalValue.toFixed(1)])
     ]);
     card.appendChild(sl);
     card.appendChild(el("div",{class:"breakdown"},[breakdown.join("  ·  ")]));
@@ -481,22 +673,30 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
   function render(){
     card.innerHTML = "";
     card.appendChild(el("h3",{},[title||"Pyramid Element"]));
-    var letters = Object.keys(PYRAMID_VALUES[level]);
-    var letterSel = selectEl(letters.map(function(l){ return [l, l+" value  (+"+PYRAMID_VALUES[level][l].toFixed(1)+")"]; }), rec.letter, function(v){ rec.letter=v; rec.skill=PYRAMID_SKILLS[v][0]; render(); save(); });
-    var skillOpts = PYRAMID_SKILLS[rec.letter]||["(none listed)"];
-    var skillSel = selectEl(skillOpts, rec.skill, function(v){ rec.skill=v; save(); });
-    var r = el("div",{class:"row"});
-    r.appendChild(field("Value letter", letterSel));
-    r.appendChild(field("Specific skill", skillSel));
-    card.appendChild(r);
+    card.appendChild(customOverrideField(rec, render));
+    var v = 0, scoreLabel = "";
+    if(rec.custom){
+      v = customNumericValue(rec);
+      scoreLabel = "Custom: "+(rec.customName||"(unnamed)");
+    } else {
+      var letters = Object.keys(PYRAMID_VALUES[level]);
+      var letterSel = selectEl(letters.map(function(l){ return [l, l+" value  (+"+PYRAMID_VALUES[level][l].toFixed(1)+")"]; }), rec.letter, function(v){ rec.letter=v; rec.skill=PYRAMID_SKILLS[v][0]; render(); save(); });
+      var skillOpts = PYRAMID_SKILLS[rec.letter]||["(none listed)"];
+      var skillSel = selectEl(skillOpts, rec.skill, function(v){ rec.skill=v; save(); });
+      var r = el("div",{class:"row"});
+      r.appendChild(field("Value letter", letterSel));
+      r.appendChild(field("Specific skill", skillSel));
+      card.appendChild(r);
+      v = PYRAMID_VALUES[level][rec.letter]||0;
+      scoreLabel = "Letter "+rec.letter;
+    }
     var r2 = el("div",{class:"row"});
     r2.appendChild(rolePicker(rec, "bottomBase", "Bottom Base(s)"));
     r2.appendChild(rolePicker(rec, "mid", "Mid(s)"));
     r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
     card.appendChild(r2);
-    var v = PYRAMID_VALUES[level][rec.letter]||0;
     rec._value = v;
-    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Letter "+rec.letter]), el("span",{class:"val"},["+"+v.toFixed(1)]) ]));
+    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},[scoreLabel]), el("span",{class:"val"},["+"+v.toFixed(1)]) ]));
     if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove element"]));
     if(!__initial && typeof onUpdate==="function") onUpdate();
     __initial = false;
@@ -513,17 +713,25 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate){
   function render(){
     card.innerHTML="";
     card.appendChild(el("h3",{},[title||"Toss"]));
-    var sel = selectEl(Object.keys(options).map(function(k){ return [k, k+"  ("+options[k].toFixed(1)+")"]; }), rec.skill, function(v){ rec.skill=v; render(); save(); });
-    card.appendChild(el("div",{class:"row"},[ field("Toss skill", sel) ]));
+    card.appendChild(customOverrideField(rec, render));
+    var v = 0, scoreLabel = "";
+    if(rec.custom){
+      v = customNumericValue(rec);
+      scoreLabel = "Custom: "+(rec.customName||"(unnamed)");
+    } else {
+      var sel = selectEl(Object.keys(options).map(function(k){ return [k, k+"  ("+options[k].toFixed(1)+")"]; }), rec.skill, function(v){ rec.skill=v; render(); save(); });
+      card.appendChild(el("div",{class:"row"},[ field("Toss skill", sel) ]));
+      v = options[rec.skill];
+      scoreLabel = "Whole-skill value";
+    }
     var r2 = el("div",{class:"row"});
     r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
     r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
     r2.appendChild(rolePicker(rec, "backBase", "Back Base"));
     r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
     card.appendChild(r2);
-    var v = options[rec.skill];
     rec._value = v;
-    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Whole-skill value"]), el("span",{class:"val"},[v.toFixed(1)]) ]));
+    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},[scoreLabel]), el("span",{class:"val"},[v.toFixed(1)]) ]));
     if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove toss"]));
     if(!__initial && typeof onUpdate==="function") onUpdate();
     __initial = false;
@@ -540,9 +748,14 @@ function tumblePassCard(rec, level, onRemove, title, onUpdate){
   function render(){
     card.innerHTML="";
     card.appendChild(el("h3",{},[title||"Tumbling Pass"]));
+    card.appendChild(customOverrideField(rec, render));
+    var val = 0;
+    if(rec.custom){
+      val = customNumericValue(rec);
+      card.appendChild(el("div",{class:"breakdown"},["Custom pass: "+(rec.customName||"(unnamed)")]));
+    } else {
     var modeSel = selectEl([["standing","Standing Tumbling (named combo)"],["running","Running Tumbling (build pass)"]], rec.mode, function(v){ rec.mode=v; render(); save(); });
     card.appendChild(el("div",{class:"row"},[ field("Mode", modeSel) ]));
-    var val = 0;
     if(rec.mode==="standing"){
       var list = STANDING_TUMBLE[level];
       rec.combo = rec.combo || list[0][1];
@@ -570,6 +783,7 @@ function tumblePassCard(rec, level, onRemove, title, onUpdate){
       val = RUN_ENTRY[rec.entry] + t1v + t2v + RUN_DISMOUNT[rec.dismount];
       card.appendChild(el("div",{class:"breakdown"},["Entry "+RUN_ENTRY[rec.entry]+" + T1 "+t1v+" + T2 "+t2v+(doubled?" (doubled)":"")+" + Dismount "+RUN_DISMOUNT[rec.dismount]]));
     }
+    } // end !rec.custom
     var r3 = el("div",{class:"row"},[ field("Athlete(s)", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]);
     card.appendChild(r3);
     rec._value = val;
@@ -733,6 +947,10 @@ function viewTeam(container){
 }
 
 /* ---------------- Export ---------------- */
+function skillDesc(r){
+  if(r.custom) return "CUSTOM: "+(r.customName||"(unnamed)");
+  return null;
+}
 function buildExportText(){
   var lvl = state.level;
   var lines = [];
@@ -759,31 +977,31 @@ function buildExportText(){
     if(o.acro){
       var at = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ at += r._value||0; });
       lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" → total "+at.toFixed(2));
-      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:"")+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base")+" "+roleExport(r,"flyer","Flyer")); });
+      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(skillDesc(r) || (r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:""))+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.pyramid){
       var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
       lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" → total "+pt.toFixed(2));
-      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+r.skill+" (letter "+r.letter+") → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"bottomBase","Bottom Base")+" "+roleExport(r,"mid","Mid")+" "+roleExport(r,"flyer","Flyer")); });
+      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+(skillDesc(r) || r.skill+" (letter "+r.letter+")")+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"bottomBase","Bottom Base")+" "+roleExport(r,"mid","Mid")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.toss){
       var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
       lines.push("\nToss — total "+tt.toFixed(2));
-      lines.push("  Synced: "+o.toss.synced.skill+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
-      lines.push("  Solo: "+o.toss.solo.skill+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
+      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
+      lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
     }
     if(o.tumbling){
       var sum=0; o.tumbling.forEach(function(r){ sum+= r._value||0; });
       var avg = o.tumbling.length? sum/o.tumbling.length:0;
       lines.push("\nTumbling — average of "+o.tumbling.length+" passes = "+avg.toFixed(2));
-      o.tumbling.forEach(function(r,i){ lines.push("  Pass "+(i+1)+" ("+r.mode+"): value "+(r._value||0).toFixed(2)+"   ["+(r.athletes||[]).join(", ")+"]"); });
+      o.tumbling.forEach(function(r,i){ lines.push("  Pass "+(i+1)+" ("+(skillDesc(r) || r.mode)+"): value "+(r._value||0).toFixed(2)+"   ["+(r.athletes||[]).join(", ")+"]"); });
     }
   }
   var t = state.data.team && state.data.team[lvl];
   if(t && t.segments && t.segments.length){
     lines.push("\n\nTEAM ROUTINE SEGMENTS");
     t.segments.forEach(function(seg, i){
-      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced)":"")+" — "+(seg.skill && (seg.skill.skill || seg.skill.combo || seg.skill.entry) || ""));
+      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced)":"")+" — "+(seg.skill && (skillDesc(seg.skill) || seg.skill.skill || seg.skill.combo || seg.skill.entry) || ""));
     });
   }
   return lines.join("\n");
@@ -830,7 +1048,11 @@ function renderAll(){
 }
 
 load();
+fbInit();
+checkAccess();
 function start(){ renderAll(); }
-if(window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(start); else start();
+start();
 })();
 </script>
+</body>
+</html>
