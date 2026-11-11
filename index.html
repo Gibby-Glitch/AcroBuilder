@@ -220,6 +220,19 @@ table.judgetable td.jlabelcol{ width:44%; }
 .pgroup.pempty-group{ display:flex; align-items:center; justify-content:center; color:var(--fg-dim); font-size:13px; font-style:italic; }
 .proleflat{ margin-top:10px; }
 
+/* Numbered athlete list (Compulsory Tumbling practice view — no roles to
+   group by, just a straightforward list of who's tumbling this pass) */
+.pliststatus{ font-family:var(--font-mono); font-size:13px; font-weight:700; margin-top:8px; }
+.pliststatus.met{ color:var(--good); }
+.pliststatus.pending{ color:var(--warn); }
+.plist{ margin-top:10px; display:flex; flex-direction:column; }
+.plistitem{
+  display:flex; align-items:baseline; gap:10px; padding:7px 0; border-bottom:1px solid var(--border);
+}
+.plistitem:last-child{ border-bottom:none; }
+.plistnum{ font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--fg-dim); min-width:22px; }
+.plistname{ font-size:18px; font-weight:700; color:var(--fg); }
+
 [hidden]{display:none !important;}
 
 .syncbadge{
@@ -1618,6 +1631,30 @@ function practiceGroupCard(title, sub, groups){
   card.appendChild(grid);
   return card;
 }
+/* Numbered vertical list of athlete names — for Tumbling, which has no
+   base/flyer roles to group by, just a straight list of who's tumbling. */
+function practiceAthleteListCard(title, sub, names, required){
+  names = names || [];
+  var card = el("div",{class:"pcard"});
+  card.appendChild(el("div",{class:"ptitle"},[title]));
+  if(sub) card.appendChild(el("div",{class:"psub"},[sub]));
+  if(required!=null){
+    var met = names.length>=required;
+    card.appendChild(el("div",{class:"pliststatus "+(met?"met":"pending")},[names.length+"/"+required+" tumblers assigned"]));
+  }
+  if(!names.length){
+    card.appendChild(el("div",{class:"prole empty"},["No athletes assigned yet — set this in Edit mode"]));
+  } else {
+    var list = el("div",{class:"plist"});
+    names.forEach(function(name,i){
+      list.appendChild(el("div",{class:"plistitem"},[
+        el("span",{class:"plistnum"},[(i+1)+"."]), el("span",{class:"plistname"},[name])
+      ]));
+    });
+    card.appendChild(list);
+  }
+  return card;
+}
 /* Same role-row list as practiceGroupCard, but for the single-group cases
    (one Optional element, not two Compulsory groups) — no "Group 1" box. */
 function practiceFlatRoleCard(title, sub, rows){
@@ -1674,9 +1711,7 @@ function viewPracticeCompulsorySub(container, eventName){
         {label:"PYRAMID 2", rows: practiceRoleRows(rec, pyrPairs2)}
       ]));
     } else if(eventName==="Tumbling"){
-      var names = (rec.tumblers||[]).join(", ");
-      container.appendChild(practiceCard(skillName, eventName+" compulsory",
-        (names?("Tumblers: "+names):"")+"  ("+(rec.tumblers||[]).length+"/"+required+")"));
+      container.appendChild(practiceAthleteListCard(skillName, eventName+" compulsory", rec.tumblers||[], required));
     } else {
       container.appendChild(practiceGroupCard(skillName, eventName+" compulsory", [
         {label:"GROUP 1", rows: practiceRoleRows(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]])},
