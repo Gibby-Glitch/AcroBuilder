@@ -205,6 +205,20 @@ table.judgetable td.jlabelcol{ width:44%; }
 .prole.empty{ color:var(--fg-dim); font-weight:600; font-style:italic; font-size:15px; }
 .pempty{ color:var(--fg-dim); font-size:15px; padding:6px 2px 2px; }
 
+/* Group 1 / Group 2 side-by-side role cards (Compulsory Acro/Toss/Pyramid) */
+.pgroupgrid{ display:flex; gap:14px; margin-top:12px; flex-wrap:wrap; }
+.pgroup{ flex:1 1 220px; min-width:0; background:var(--surface-2); border-radius:9px; padding:10px 14px 12px; }
+.pgrouplabel{
+  font-family:var(--font-display); font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--accent); margin-bottom:8px; padding-bottom:6px; border-bottom:2px solid var(--accent);
+}
+.prolerow{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:5px 0; border-bottom:1px solid var(--border); }
+.prolerow:last-child{ border-bottom:none; }
+.prolerow .rlabel{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--fg-dim); white-space:nowrap; }
+.prolerow .rvalue{ font-size:17px; font-weight:700; color:var(--fg); text-align:right; }
+.pgroup.pempty-group{ display:flex; align-items:center; justify-content:center; color:var(--fg-dim); font-size:13px; font-style:italic; }
+.proleflat{ margin-top:10px; }
+
 [hidden]{display:none !important;}
 
 .syncbadge{
@@ -1553,12 +1567,73 @@ function practiceRoleLine(rec, pairs){
   }).filter(Boolean);
   return parts.join("   •   ");
 }
+/* Returns [{label, value}] for only the roles that actually have names set
+   (skips N/A'd and untouched roles) — feeds the card-style role list below. */
+function practiceRoleRows(rec, pairs){
+  rec = rec || {};
+  return pairs.map(function(p){
+    var key = p[0], label = p[1];
+    if(rec[key+"_na"]) return null;
+    var names = rec[key]||[];
+    if(!names.length) return null;
+    return {label:label, value:names.join(", ")};
+  }).filter(Boolean);
+}
 function practiceCard(title, sub, roleLine){
   var card = el("div",{class:"pcard"});
   card.appendChild(el("div",{class:"ptitle"},[title]));
   if(sub) card.appendChild(el("div",{class:"psub"},[sub]));
   if(roleLine) card.appendChild(el("div",{class:"prole"},[roleLine]));
   else card.appendChild(el("div",{class:"prole empty"},["No athletes assigned yet — set this in Edit mode"]));
+  return card;
+}
+/* Skill name at the top, then one or two role columns (Group 1 / Group 2
+   side by side) each listing ROLE: NAME rows — used wherever Compulsory
+   has two simultaneous groups performing the same skill. */
+function practiceGroupCard(title, sub, groups){
+  var card = el("div",{class:"pcard"});
+  card.appendChild(el("div",{class:"ptitle"},[title]));
+  if(sub) card.appendChild(el("div",{class:"psub"},[sub]));
+  var anyRows = groups.some(function(g){ return g.rows && g.rows.length; });
+  if(!anyRows){
+    card.appendChild(el("div",{class:"prole empty"},["No athletes assigned yet — set this in Edit mode"]));
+    return card;
+  }
+  var grid = el("div",{class:"pgroupgrid"});
+  groups.forEach(function(g){
+    var col = el("div",{class: g.rows.length ? "pgroup" : "pgroup pempty-group"});
+    if(g.rows.length){
+      col.appendChild(el("div",{class:"pgrouplabel"},[g.label]));
+      g.rows.forEach(function(r){
+        col.appendChild(el("div",{class:"prolerow"},[
+          el("span",{class:"rlabel"},[r.label]), el("span",{class:"rvalue"},[r.value])
+        ]));
+      });
+    } else {
+      col.appendChild(el("span",{},[g.label+" — not assigned"]));
+    }
+    grid.appendChild(col);
+  });
+  card.appendChild(grid);
+  return card;
+}
+/* Same role-row list as practiceGroupCard, but for the single-group cases
+   (one Optional element, not two Compulsory groups) — no "Group 1" box. */
+function practiceFlatRoleCard(title, sub, rows){
+  var card = el("div",{class:"pcard"});
+  card.appendChild(el("div",{class:"ptitle"},[title]));
+  if(sub) card.appendChild(el("div",{class:"psub"},[sub]));
+  if(!rows.length){
+    card.appendChild(el("div",{class:"prole empty"},["No athletes assigned yet — set this in Edit mode"]));
+  } else {
+    var wrap = el("div",{class:"proleflat"});
+    rows.forEach(function(r){
+      wrap.appendChild(el("div",{class:"prolerow"},[
+        el("span",{class:"rlabel"},[r.label]), el("span",{class:"rvalue"},[r.value])
+      ]));
+    });
+    card.appendChild(wrap);
+  }
   return card;
 }
 function practiceSection(label){ return el("div",{class:"psection"},[label]); }
@@ -1590,24 +1665,23 @@ function viewPracticeCompulsorySub(container, eventName){
     var skillName = skillNames[origIdx];
     var key = "s"+origIdx;
     var rec = evBucket[key] || {};
-    var lines = [];
     if(eventName==="Pyramid"){
       var pyrPairs1 = [["g1BottomBase","Bottom"],["g1Mid","Mid"],["g1Flyer","Flyer"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1SideBase","Side"],["g1Catcher","Catcher"]];
       var pyrPairs2 = [["g2BottomBase","Bottom"],["g2Mid","Mid"],["g2Flyer","Flyer"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2SideBase","Side"],["g2Catcher","Catcher"]];
-      var g1 = practiceRoleLine(rec, pyrPairs1);
-      var g2 = practiceRoleLine(rec, pyrPairs2);
-      if(g1) lines.push("PYRAMID 1 — "+g1);
-      if(g2) lines.push("PYRAMID 2 — "+g2);
+      container.appendChild(practiceGroupCard(skillName, eventName+" compulsory", [
+        {label:"PYRAMID 1", rows: practiceRoleRows(rec, pyrPairs1)},
+        {label:"PYRAMID 2", rows: practiceRoleRows(rec, pyrPairs2)}
+      ]));
     } else if(eventName==="Tumbling"){
       var names = (rec.tumblers||[]).join(", ");
-      lines.push((names?("Tumblers: "+names):"No tumblers assigned yet")+"  ("+(rec.tumblers||[]).length+"/"+required+")");
+      container.appendChild(practiceCard(skillName, eventName+" compulsory",
+        (names?("Tumblers: "+names):"")+"  ("+(rec.tumblers||[]).length+"/"+required+")"));
     } else {
-      var g1a = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
-      var g2a = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
-      if(g1a) lines.push("GROUP 1 — "+g1a);
-      if(g2a) lines.push("GROUP 2 — "+g2a);
+      container.appendChild(practiceGroupCard(skillName, eventName+" compulsory", [
+        {label:"GROUP 1", rows: practiceRoleRows(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]])},
+        {label:"GROUP 2", rows: practiceRoleRows(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]])}
+      ]));
     }
-    container.appendChild(practiceCard(skillName, eventName+" compulsory", lines.join("     ||     ")));
   });
 }
 function viewPracticeOptionalSub(container, cat){
@@ -1617,24 +1691,24 @@ function viewPracticeOptionalSub(container, cat){
     var acro = obucket.acro||[];
     if(!acro.length) container.appendChild(el("div",{class:"pempty"},["No acro optional elements set yet."]));
     acro.forEach(function(rec,i){
-      var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
+      var rows = practiceRoleRows(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
       var sub = skillDesc(rec) || [rec.entry,rec.top,rec.dismount].filter(Boolean).join(" → ") || "(not set yet)";
-      container.appendChild(practiceCard("Element "+(i+1), sub, roles));
+      container.appendChild(practiceFlatRoleCard("Element "+(i+1), sub, rows));
     });
   } else if(cat==="Pyramid"){
     var pyr = obucket.pyramid||[];
     if(!pyr.length) container.appendChild(el("div",{class:"pempty"},["No pyramid optional elements set yet."]));
     pyr.forEach(function(rec,i){
-      var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"],["frontBase","Front"],["backBase","Back"],["sideBase","Side"],["catcher","Catcher"]]);
-      container.appendChild(practiceCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", roles));
+      var rows = practiceRoleRows(rec, [["bottomBase","Bottom"],["mid","Mid"],["flyer","Flyer"],["frontBase","Front"],["backBase","Back"],["sideBase","Side"],["catcher","Catcher"]]);
+      container.appendChild(practiceFlatRoleCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", rows));
     });
   } else if(cat==="Toss"){
     if(!obucket.toss){ container.appendChild(el("div",{class:"pempty"},["No toss optional set yet."])); return; }
     [["synced","Synced Toss"],["solo","Solo Toss"]].forEach(function(p){
       var rec = obucket.toss[p[0]];
       if(rec){
-        var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
-        container.appendChild(practiceCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", roles));
+        var rows = practiceRoleRows(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
+        container.appendChild(practiceFlatRoleCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", rows));
       }
     });
   } else {
