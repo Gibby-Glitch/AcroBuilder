@@ -1,0 +1,777 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Acro Score Builder</title>
+<style>
+/* Layout: sticky top nav (level/round tabs) over a single scrolling column of cards;
+   each card is a self-contained "skill picker" widget reused across Optional/Team. */
+:root{
+  --bg:#f7f5f1; --surface:#ffffff; --surface-2:#f0ede6; --border:#e2ddd3;
+  --fg:#241f1a; --fg-dim:#6b6256; --accent:#8a4a3d; --accent-fg:#ffffff;
+  --good:#3f7a52; --warn:#b8862f; --bad:#b1473f;
+  --font-display:'Space Grotesk',system-ui,sans-serif; --font-body:'Inter',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
+  padding-top: env(safe-area-inset-top,0px); padding-bottom: env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1815; --surface:#242019; --surface-2:#2c271f; --border:#3a342a;
+    --fg:#f3efe8; --fg-dim:#aba195; --accent:#e0a28e; --accent-fg:#241008;
+    --good:#7ac491; --warn:#e2b25c; --bad:#e28b82; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1815; --surface:#242019; --surface-2:#2c271f; --border:#3a342a;
+  --fg:#f3efe8; --fg-dim:#aba195; --accent:#e0a28e; --accent-fg:#241008;
+  --good:#7ac491; --warn:#e2b25c; --bad:#e28b82; color-scheme:dark;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--fg); font-family:var(--font-body);
+  font-size:14px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+h1,h2,h3{font-family:var(--font-display); text-wrap:balance; margin:0;}
+.num{font-variant-numeric:tabular-nums;}
+button{font-family:inherit; cursor:pointer;}
+
+/* ---------- Top bar ---------- */
+.topbar{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+  background:var(--bg); padding-block:14px 10px; margin-inline:-16px; padding-inline:16px;
+  border-bottom:1px solid var(--border);
+}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg);}
+.brand{display:flex; align-items:baseline; gap:8px; margin-bottom:10px;}
+.brand h1{font-size:19px;}
+.brand span{color:var(--fg-dim); font-size:12px;}
+.tabrow{display:flex; gap:6px; flex-wrap:wrap;}
+.tab{
+  border:1px solid var(--border); background:var(--surface); color:var(--fg-dim);
+  border-radius:8px; padding:7px 12px; font-size:13px; font-weight:600;
+}
+.tab.active{background:var(--accent); color:var(--accent-fg); border-color:var(--accent);}
+.subrow{display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;}
+.pill{
+  border:1px solid var(--border); background:var(--surface-2); color:var(--fg);
+  border-radius:999px; padding:5px 12px; font-size:12.5px; font-weight:600;
+}
+.pill.active{background:var(--fg); color:var(--bg); border-color:var(--fg);}
+
+main{max-width:760px; margin:0 auto; padding-bottom:60px;}
+.sectiontitle{font-size:15px; margin:22px 0 10px; display:flex; align-items:baseline; gap:8px; justify-content:space-between;}
+.sectiontitle .req{font-family:var(--font-mono); font-size:12px; color:var(--fg-dim); font-weight:400;}
+
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:14px; margin-bottom:12px;
+}
+.card h3{font-size:14.5px; margin-bottom:2px;}
+.card .meta{color:var(--fg-dim); font-size:12px; margin-bottom:10px;}
+.row{display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;}
+.field{display:flex; flex-direction:column; gap:4px; min-width:0; flex:1 1 150px;}
+.field label{font-size:11px; color:var(--fg-dim); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+select, input[type=text], input[type=number]{
+  background:var(--surface-2); color:var(--fg); border:1px solid var(--border); border-radius:7px;
+  padding:7px 8px; font-size:13px; font-family:inherit; width:100%;
+}
+.checkline{display:flex; align-items:center; gap:6px; font-size:13px;}
+.checkline input{width:16px;height:16px;}
+
+.athletepicker{position:relative;}
+.athletebtn{
+  width:100%; text-align:left; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:7px; padding:7px 8px; font-size:13px; color:var(--fg); min-height:34px;
+  display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+}
+.athletebtn .placeholder{color:var(--fg-dim);}
+.chip{background:var(--accent); color:var(--accent-fg); border-radius:999px; padding:2px 8px; font-size:12px; font-weight:600;}
+.athletepanel{
+  display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px;
+  max-height:220px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.18);
+}
+.athletepanel.open{display:block;}
+.athletepanel label{display:flex; align-items:center; gap:8px; padding:5px 4px; font-size:13px; border-radius:6px;}
+.athletepanel label:hover{background:var(--surface-2);}
+.athletepanel input{width:15px;height:15px;}
+
+.scoreline{
+  display:flex; justify-content:space-between; align-items:baseline; margin-top:10px;
+  padding-top:10px; border-top:1px dashed var(--border); font-family:var(--font-mono);
+}
+.scoreline .val{font-size:19px; font-weight:700; color:var(--accent);}
+.scoreline .lbl{font-size:12px; color:var(--fg-dim);}
+.breakdown{font-size:11.5px; color:var(--fg-dim); font-family:var(--font-mono); margin-top:4px;}
+
+.totalbar{
+  display:flex; justify-content:space-between; align-items:center; background:var(--surface-2);
+  border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:14px 0;
+}
+.totalbar .big{font-family:var(--font-mono); font-size:26px; font-weight:700; color:var(--accent);}
+.totalbar .lbl{font-size:12.5px; color:var(--fg-dim); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+
+.ghostbtn{
+  background:transparent; border:1px dashed var(--border); color:var(--fg-dim); border-radius:8px;
+  padding:9px 12px; font-size:12.5px; font-weight:600; width:100%;
+}
+.ghostbtn:hover{border-color:var(--accent); color:var(--accent);}
+.removebtn{
+  background:none; border:none; color:var(--bad); font-size:12px; font-weight:600; padding:4px;
+}
+
+.reqgrid{display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); margin-bottom:14px;}
+.reqcard{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 12px;
+  display:flex; justify-content:space-between; align-items:center; gap:8px;
+}
+.reqcard .name{font-size:12.5px; font-weight:600;}
+.reqcard .status{font-family:var(--font-mono); font-size:12px; font-weight:700;}
+.status.met{color:var(--good);} .status.pending{color:var(--warn);}
+.dot{width:7px;height:7px;border-radius:50%; display:inline-block; margin-right:5px;}
+.dot.met{background:var(--good);} .dot.pending{background:var(--warn);}
+
+textarea.exportbox{
+  width:100%; min-height:380px; background:var(--surface-2); color:var(--fg); border:1px solid var(--border);
+  border-radius:10px; padding:12px; font-family:var(--font-mono); font-size:12px; line-height:1.6; white-space:pre;
+}
+.hint{font-size:12px; color:var(--fg-dim); margin:8px 0;}
+@media print{
+  .topbar,.ghostbtn,.removebtn,select,input,.athletepicker{display:none !important;}
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<div class="topbar">
+  <div class="brand"><h1>Acro Score Builder</h1><span>Level Acro Jr/Sr Team</span></div>
+  <div class="tabrow" id="roundTabs"></div>
+  <div class="subrow" id="levelPills"></div>
+</div>
+
+<main id="app"></main>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------------- Data ---------------- */
+var ATHLETES = ["Amanda Barker","Charlee Beasley","Corabel Blancett","Angelique Butler","Nia Centeno",
+"Autumn Collatt","Eden Combs","Piper Dockrey","Emma-Kate Ellis","Olivia Garcia","Tessa Harris",
+"Zendaya Lima","Mikayla Martin","Addyson Parker","Leighton Robinson","Gabriella Sasser","Hannah Spruiell",
+"Kylie Sullivan","Anna Teply","Malia Trepinski","Isabella Trujillo","Lucy Blanco"];
+
+var COMPULSORY = {
+  3:{Acro:["Toe Pitch Catch Stand – Straight Ride Dismount","Lib Prep Cradle","Walk Up Tip Over Punk"],
+     Pyramid:["2-1-1 Straight Support, Group Load In from Behind, No Release, Load Out to Group"],
+     Toss:["Tuck Open","Toe Touch"],
+     Tumbling:["Standing Back Handspring (SBHS)","Cartwheel Back Handspring (CW BHS)","Run, Hurdle, 2 Back Handsprings, Rebound Stick"]},
+  4:{Acro:["Toe Pitch Catch Stand – Double Tempo Elevator Through Extension – Straight Ride ½ Dismount","Extension Lib Arabesque Cradle","Ground Up Punk Move Release (assists elbow/back)"],
+     Pyramid:["2-1-1 Straight Support – Toe Pitch from Side In, Top Release, 180 Down"],
+     Toss:["Full","¾ Front Tuck"],
+     Tumbling:["Standing 2 Back Handsprings","Cartwheel 2 Back Handsprings","Round Off, Back Handspring, Back Tuck"]}
+};
+
+var OPT_BASE = {3:{Acro:9.2,Pyramid:9.4},4:{Acro:8.8,Pyramid:8.8}};
+var OPT_ELEMENTS = {3:4,4:5};
+var TEAM_REQ = {
+  3:{Acro:{n:3,synced:1,base:9.2},Pyramid:{n:2,synced:0,base:9.4},Toss:{n:3,synced:1,base:null},
+     "Standing Tumbling":{n:6,synced:2},"Running Tumbling":{n:6,synced:2}},
+  4:{Acro:{n:4,synced:1,base:8.8},Pyramid:{n:2,synced:0,base:8.8},Toss:{n:4,synced:1,base:null},
+     "Standing Tumbling":{n:8,synced:3},"Running Tumbling":{n:8,synced:3}}
+};
+var TUMBLE_OPT = {3:{solo:2,duo:1,trio:1,quad:1},4:{solo:3,duo:1,trio:1,quad:1}};
+
+var GROUP_PTS = {"Group (3+ bases)":0,"Duo (2 bases / 2-1)":1,"Solo base (1-1)":2};
+var DIFF_CAT = [[3,5,"A – Novice",0.2],[6,8,"B – Beginner",0.4],[9,11,"C – Intermediate",0.6],
+  [12,14,"D – Advanced",0.8],[15,17,"E – Pre-Elite",1.0],[18,999,"F – Elite",1.2]];
+
+var HS_ENTRY = {"Elevator In":1,"Walk Up from Behind":2,"Hip Pop from Behind":3,"Calf Pop from Behind":4,
+  "Hip Pop from Front Half Up":5,"Ground-Up Reverse Jump In":6,"Press from Thigh Stand":7,"Press from Ground (New)":8};
+var HS_TOP = {"Basic Support Hold":0,"Diamond Hold":1,"Tuck Hold":2,"Straddle Hold":3,"L Hold":4,"V Hold":5,
+  "Handstand Hold (prep level)":6,"Handstand Hold (extended level)":7,"Handstand to Croc Hold or Split":8};
+var HS_OPT = {"None":0,"Press prep→ext→back down":1,"Press prep→ext→hold":2};
+var HS_DISMOUNT = {"Load Out Behind":1,"Half Turn to Front":2,"Full Turn to Front":3};
+
+var WPT_ENTRY = {"Walk Up from Behind to Walk Out":1,"Calf Pop to Shoulder – Walk Out":2,"Jump Around to Shoulder Walk Out":3,
+  "Walk Around":4,"Toe Pitch Catch":5,"Base Squat Step On":6,"Podsheshka to Shoulder Stand":7,"Hip Toss":8,"Toe Pitch Full Catch":10};
+var WPT_ENTRY_EXT_BONUS = {"Walk Around":2,"Toe Pitch Catch":2,"Base Squat Step On":2,"Hip Toss":3};
+var WPT_TOP = {"Hold at prep":0,"Press extension, quick return to prep":1,"Press extension, hold 4 counts, return":2,
+  "Press extension, hold 4 counts, dismount from extension":3,"Pop half turn, catch at prep":4,"Pop half pass catch":5,"Pop half, catch in extension":6};
+var WPT_DISMOUNT = {"Straight Pop Down (prep)":1,"Straight Pop Down (ext)":2,"Half Pop Down (prep)":2,"Half Pop Down (ext)":3,
+  "Full Pop to Cradle (prep)":3,"Full Pop to Cradle (ext)":4,"Full Turn Pop Off (prep)":4,"Full Turn Pop Off (ext)":5,
+  "Front Tuck (prep)":4,"Front Tuck (ext)":5,"Front Pike (prep)":5,"Front Pike (ext)":6,"Front Layout (prep)":6,"Front Layout (ext)":7,
+  "Front Full (prep)":7,"Front Full (ext)":8,"Back Tuck (prep)":5,"Back Tuck (ext)":6,"Back Pike (prep)":6,"Back Pike (ext)":7,
+  "Back Layout (prep)":7,"Back Layout (ext)":8,"Back Full (prep)":8,"Back Full (ext)":9};
+
+var PUNK_ENTRY = {"Climb Up Tip Over":1,"Ground Up":2,"Pop Over":3,"Pitch Over":4,"Jump Half In":5};
+var PUNK_TOP = {"Tuck":1,"Extended Body Position":2,"Release Punk":3,"Reverse Punk Popover":7};
+var PUNK_DISMOUNT = {"Tuck Through":1,"Straight Body from Release":2,"Pop Snap from Release":3};
+
+var PYRAMID_VALUES = {3:{A:0,B:0.2,C:0.4,D:0.6,E:0.8},4:{A:0,B:0.1,C:0.2,D:0.4,E:0.6,F:0.8,G:1.0,H:1.2}};
+var PYRAMID_SKILLS = {
+  A:["Group Thigh Handstand, Seated Knee"], B:["Low Knee Handstand Platform","Table Stand on Thigh"],
+  C:["2-1-1 Group Load Behind","Shoulder Seat Columns (2-2-1)"], D:["2-1-1 Side Group Toe Pitch Entry","2-2-1 Column Punk"],
+  E:["2-1-1 Group Pitch Entry","2-1-1 2-Person Pitch Entry","Crab Table 2-2-1","Flying V"],
+  F:["2-1-1 Group Pitch","Two-Person Pitch 2-1-1","Single-Person Pitch 2-1-1","Crab Table 2-2-1 Punk"],
+  G:["2-1-1 Group Pitch","2-1-1 2-Person Pitch","2-1-1 Single Base Pitch","2-2-1 Shoulder Sit"],
+  H:["2-1-1 Group Load, Side or Behind","2-1-1 Single Pitch","2-1-1 Group or 2-Base Pitch","Single-Base Column (1-1-1)","Crab / Table 1-1-1"]
+};
+
+var TOSS_VALUES = {
+  3:{"Front Tuck ¾":10.0,"Kick Full":10.0,"Full":9.8,"Handstand ¾ Pop to Back":9.8,"Handstand ¼ Pop to Cradle":9.4,
+     "Flat Body No Stand Full":9.2,"Pike Open":9.2,"Tuck Open":8.8,"Straddle":8.5,"Straight Ride":8.0,"Elevator":7.8},
+  4:{"Arabian":10.0,"Front Tuck ¾ Open Full":10.0,"Back Tuck":10.0,"Front Layout":9.8,"Kick Full":9.6,"Front Tuck ¾":9.4,
+     "Handstand ¾ Pop to Back":9.4,"Handstand ¼ Pop to Cradle":9.0,"Pike Open":8.8,"Tuck Open":8.6,"Straddle":8.4,
+     "Straight Ride":8.2,"Elevator":8.0}
+};
+
+var STANDING_TUMBLE = {
+  3:[[7.8,"Handstand step-down to rebound"],[8.0,"Cartwheel"],[8.2,"Cartwheel step-together to rebound"],[8.2,"Toe touch"],
+     [8.8,"Toe touch → toe touch"],[9.0,"Back walkover"],[9.1,"Front walkover"],[9.2,"Standing back handspring"],
+     [9.5,"Front walkover → cartwheel → back walkover"],[9.7,"Front walkover → cartwheel → back handspring"],
+     [9.75,"Cartwheel → back handspring"],[9.8,"Standing 2 back handsprings"],[9.8,"Toe touch → back handspring"],
+     [9.9,"Cartwheel → 2 back handsprings"],[10.0,"Standing back tuck"],[10.0,"Standing aerial"]],
+  4:[[8.2,"Cartwheel → back handspring"],[8.5,"Toe touch → back handspring"],[8.7,"Cartwheel → 2 back handsprings"],
+     [9.0,"Aerial"],[9.0,"Standing 2 back handsprings"],[9.2,"Standing back tuck"],[9.4,"Toe touch → back tuck"],
+     [9.5,"Toe touch → toe touch → back tuck"],[9.5,"Aerial → back handspring"],[9.5,"Standing back pike"],
+     [9.6,"Standing back tuck → back tuck"],[9.6,"Standing 2 back handsprings → back tuck"],[9.6,"Cartwheel → back tuck"],
+     [9.6,"Aerial → 2 back handsprings"],[9.7,"Standing back handspring → back tuck"],[9.7,"Standing 2 back handsprings → back pike"],
+     [9.7,"Cartwheel → back pike"],[9.7,"Aerial → back tuck"],[9.7,"Aerial → back handspring → back tuck"],[9.7,"Standing layout"],
+     [9.75,"Aerial → back handspring → back pike"],[9.8,"Standing back handspring → back pike"],
+     [9.8,"Standing 2 back handsprings → back layout"],[9.8,"Cartwheel → back layout"],[9.8,"Aerial → back pike"],
+     [9.8,"Aerial → back handspring → back layout"],[9.8,"Standing back half"],[9.9,"Standing 3 back tucks in a row"],
+     [9.9,"Standing back handspring → back layout"],[9.9,"Standing 2 back handsprings → back full twist"],
+     [9.9,"Aerial → back layout"],[9.95,"Cartwheel → back full twist"],[9.95,"Aerial → back handspring → back full twist"],
+     [10.0,"Standing back handspring → back full twist"],[10.0,"Standing 2 back handsprings → 1.5 twist"],
+     [10.0,"Cartwheel → 1.5 twist"],[10.0,"Aerial → back full twist"],[10.0,"Aerial → back handspring → 1.5 twist"],
+     [10.0,"Standing full"],[10.0,"Standing arabian"]]
+};
+var RUN_ENTRY = {"Round Off":0.1,"Front Handspring Step Out":0.2,"Front Handspring":0.3,"Front or Step Out":0.5,"Barani":0.5,"Front Full Step Out":0.6};
+var RUN_TRANS = {"Round Off":0.1,"Back Handspring":0.2,"Front Handspring Step Out":0.3,"Front Handspring":0.4,"Back Half":0.5,
+  "Whip":0.6,"Front Tuck":0.7,"Arabian":0.8,"Whip Full":0.9,"Back 1.5 Step Out":1.0,"Front Full Step Out":1.1,"Back 1.5 Twist":1.2,"Front Full":1.3};
+var RUN_DISMOUNT = {"Back Handspring Rebound":0.1,"Front Handspring Rebound":0.2,"Back Tuck":0.3,"Back Pike":0.4,"Front Tuck":0.5,
+  "Front Pike / Back Layout":0.6,"Front Layout":0.7,"Back Half Twist":0.8,"Front Half Twist":0.9,"Arabian":1.0,"Back Full":1.1,
+  "Front Full":1.2,"Back 1.5 Twist":1.3,"Front 1.5 Twist":1.4};
+
+/* ---------------- State ---------------- */
+var state = {round:"compulsory", level:3, uid:1, data:{}};
+function load(){
+  try{
+    var raw = localStorage.getItem("acroScoreBuilder_v1");
+    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; }
+  }catch(e){}
+}
+function save(){
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid})); }catch(e){}
+}
+function nid(){ return "n"+(state.uid++); }
+function getBucket(path){
+  var o = state.data;
+  path.forEach(function(k){ if(!o[k]) o[k]={}; o=o[k]; });
+  return o;
+}
+
+/* ---------------- Small helpers ---------------- */
+function el(tag, attrs, kids){
+  var e = document.createElement(tag);
+  if(attrs) Object.keys(attrs).forEach(function(k){
+    if(k==="class") e.className=attrs[k];
+    else if(k.indexOf("on")===0) e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  });
+  (kids||[]).forEach(function(k){ if(typeof k==="string") e.appendChild(document.createTextNode(k)); else if(k) e.appendChild(k); });
+  return e;
+}
+function diffCategory(pts){
+  for(var i=0;i<DIFF_CAT.length;i++){ if(pts>=DIFF_CAT[i][0] && pts<=DIFF_CAT[i][1]) return DIFF_CAT[i]; }
+  return [0,0,"—",0];
+}
+function selectEl(opts, value, onChange, placeholder){
+  var s = el("select",{onchange:function(e){ onChange(e.target.value); }});
+  if(placeholder) s.appendChild(el("option",{value:""},[placeholder]));
+  opts.forEach(function(o){
+    var v = Array.isArray(o)?o[0]:o, label = Array.isArray(o)?o[1]:o;
+    var op = el("option",{value:v},[label]);
+    if(String(value)===String(v)) op.setAttribute("selected","selected");
+    s.appendChild(op);
+  });
+  return s;
+}
+function field(labelTxt, inputEl){
+  return el("div",{class:"field"},[ el("label",{},[labelTxt]), inputEl ]);
+}
+function athletePicker(selected, onChange){
+  var wrap = el("div",{class:"athletepicker"});
+  var btn = el("button",{class:"athletebtn", type:"button"});
+  var panel = el("div",{class:"athletepanel"});
+  function renderBtn(){
+    btn.innerHTML = "";
+    if(!selected.length) btn.appendChild(el("span",{class:"placeholder"},["Select athlete(s)…"]));
+    selected.forEach(function(name){ btn.appendChild(el("span",{class:"chip"},[name])); });
+  }
+  ATHLETES.forEach(function(name){
+    var cb = el("input",{type:"checkbox"});
+    cb.checked = selected.indexOf(name)>=0;
+    cb.addEventListener("change", function(){
+      var i = selected.indexOf(name);
+      if(cb.checked && i<0) selected.push(name);
+      if(!cb.checked && i>=0) selected.splice(i,1);
+      renderBtn(); onChange(selected); save();
+    });
+    panel.appendChild(el("label",{},[cb, document.createTextNode(name)]));
+  });
+  btn.addEventListener("click", function(){ panel.classList.toggle("open"); });
+  document.addEventListener("click", function(e){ if(!wrap.contains(e.target)) panel.classList.remove("open"); });
+  renderBtn();
+  wrap.appendChild(btn); wrap.appendChild(panel);
+  return wrap;
+}
+
+/* ---------------- Acro skill picker (Hand Support / Walk-Pitch-Toss / Punk) ---------------- */
+function acroSkillCard(rec, onRemove, title, onUpdate){
+  rec.family = rec.family || "wpt";
+  rec.group = rec.group || "Group (3+ bases)";
+  rec.athletes = rec.athletes || [];
+  var card = el("div",{class:"card"});
+  var __initial = true;
+  function render(){
+    card.innerHTML = "";
+    card.appendChild(el("h3",{},[title||"Acro Element"]));
+    var famSel = selectEl([["hs","Hand Support / Hand-to-Hand"],["wpt","Walk, Pitch & Toss"],["punk","Punk Move"]], rec.family, function(v){ rec.family=v; render(); save(); });
+    card.appendChild(el("div",{class:"row"},[ field("Skill family", famSel) ]));
+
+    var entryMap, topMap, dismMap, pts=0, breakdown=[];
+    var gp = GROUP_PTS[rec.group];
+
+    if(rec.family==="hs"){ entryMap=HS_ENTRY; topMap=HS_TOP; dismMap=HS_DISMOUNT; }
+    else if(rec.family==="wpt"){ entryMap=WPT_ENTRY; topMap=WPT_TOP; dismMap=null; }
+    else { entryMap=PUNK_ENTRY; topMap=PUNK_TOP; dismMap=PUNK_DISMOUNT; }
+
+    rec.entry = rec.entry || Object.keys(entryMap)[0];
+    rec.top = rec.top || Object.keys(topMap)[0];
+
+    var row1 = el("div",{class:"row"});
+    row1.appendChild(field("Entry", selectEl(Object.keys(entryMap), rec.entry, function(v){ rec.entry=v; render(); save(); })));
+    row1.appendChild(field("Top skill / hold", selectEl(Object.keys(topMap), rec.top, function(v){ rec.top=v; render(); save(); })));
+    card.appendChild(row1);
+
+    if(rec.family==="hs"){
+      rec.hsopt = rec.hsopt || "None";
+      rec.dismount = rec.dismount || Object.keys(HS_DISMOUNT)[0];
+      rec.ext = !!rec.ext;
+      var row2 = el("div",{class:"row"});
+      row2.appendChild(field("Handstand option", selectEl(Object.keys(HS_OPT), rec.hsopt, function(v){ rec.hsopt=v; render(); save(); })));
+      row2.appendChild(field("Dismount", selectEl(Object.keys(HS_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      card.appendChild(row2);
+      var extLine = el("label",{class:"checkline"});
+      var extCb = el("input",{type:"checkbox"}); extCb.checked = rec.ext;
+      extCb.addEventListener("change", function(){ rec.ext = extCb.checked; render(); save(); });
+      extLine.appendChild(extCb); extLine.appendChild(document.createTextNode(" Dismount from extension height (handstand skills, +1)"));
+      card.appendChild(extLine);
+
+      pts += entryMap[rec.entry] + gp;
+      pts += topMap[rec.top] + gp;
+      pts += HS_OPT[rec.hsopt];
+      var dpts = HS_DISMOUNT[rec.dismount] + (rec.ext?1:0);
+      pts += dpts + gp;
+      breakdown = ["Entry "+entryMap[rec.entry]+" +grp "+gp, "Top "+topMap[rec.top]+" +grp "+gp,
+        "HS option +"+HS_OPT[rec.hsopt], "Dismount "+dpts+" +grp "+gp];
+    } else if(rec.family==="wpt"){
+      rec.extbonus = !!rec.extbonus;
+      rec.dismount = rec.dismount || Object.keys(WPT_DISMOUNT)[0];
+      var row2b = el("div",{class:"row"});
+      row2b.appendChild(field("Dismount", selectEl(Object.keys(WPT_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      card.appendChild(row2b);
+      if(WPT_ENTRY_EXT_BONUS[rec.entry]){
+        var extLine2 = el("label",{class:"checkline"});
+        var extCb2 = el("input",{type:"checkbox"}); extCb2.checked = rec.extbonus;
+        extCb2.addEventListener("change", function(){ rec.extbonus = extCb2.checked; render(); save(); });
+        extLine2.appendChild(extCb2); extLine2.appendChild(document.createTextNode(" Catch/walk-out in extension (+"+WPT_ENTRY_EXT_BONUS[rec.entry]+")"));
+        card.appendChild(extLine2);
+      }
+      var entryPts = WPT_ENTRY[rec.entry] + (rec.extbonus && WPT_ENTRY_EXT_BONUS[rec.entry] ? WPT_ENTRY_EXT_BONUS[rec.entry] : 0);
+      pts += entryPts + gp;
+      pts += WPT_TOP[rec.top] + gp;
+      pts += WPT_DISMOUNT[rec.dismount] + gp;
+      breakdown = ["Entry "+entryPts+" +grp "+gp, "Top "+WPT_TOP[rec.top]+" +grp "+gp, "Dismount "+WPT_DISMOUNT[rec.dismount]+" +grp "+gp];
+    } else {
+      rec.dismount = rec.dismount || Object.keys(PUNK_DISMOUNT)[0];
+      var row2c = el("div",{class:"row"});
+      row2c.appendChild(field("Dismount", selectEl(Object.keys(PUNK_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      card.appendChild(row2c);
+      var topIsReverse = rec.top === "Reverse Punk Popover";
+      pts += PUNK_ENTRY[rec.entry] + gp;
+      pts += PUNK_TOP[rec.top] + gp;
+      if(!topIsReverse){ pts += PUNK_DISMOUNT[rec.dismount] + gp; breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gp,"Top "+PUNK_TOP[rec.top]+" +grp "+gp,"Dismount "+PUNK_DISMOUNT[rec.dismount]+" +grp "+gp]; }
+      else breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gp,"Top (Reverse Punk Popover) "+PUNK_TOP[rec.top]+" +grp "+gp,"Dismount: use 1-1 Hand Support chart (solo +2)"];
+    }
+
+    var groupSel = selectEl(Object.keys(GROUP_PTS), rec.group, function(v){ rec.group=v; render(); save(); });
+    card.appendChild(el("div",{class:"row"},[ field("Group type (applies each phase)", groupSel) ]));
+    card.appendChild(el("div",{class:"row"},[ field("Athletes", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]));
+
+    var cat = diffCategory(pts);
+    rec._value = cat[3];
+    var sl = el("div",{class:"scoreline"},[
+      el("span",{class:"lbl"},["Total points "+pts+" → "+cat[2]]),
+      el("span",{class:"val"},["+"+cat[3].toFixed(1)])
+    ]);
+    card.appendChild(sl);
+    card.appendChild(el("div",{class:"breakdown"},[breakdown.join("  ·  ")]));
+
+    if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove element"]));
+    if(!__initial && typeof onUpdate==="function") onUpdate();
+    __initial = false;
+  }
+  render();
+  return card;
+}
+
+function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
+  rec.letter = rec.letter || "A";
+  rec.skill = rec.skill || PYRAMID_SKILLS["A"][0];
+  rec.base = rec.base||[]; rec.mid = rec.mid||[]; rec.flyer = rec.flyer||[];
+  var card = el("div",{class:"card"});
+  var __initial = true;
+  function render(){
+    card.innerHTML = "";
+    card.appendChild(el("h3",{},[title||"Pyramid Element"]));
+    var letters = Object.keys(PYRAMID_VALUES[level]);
+    var letterSel = selectEl(letters.map(function(l){ return [l, l+" value  (+"+PYRAMID_VALUES[level][l].toFixed(1)+")"]; }), rec.letter, function(v){ rec.letter=v; rec.skill=PYRAMID_SKILLS[v][0]; render(); save(); });
+    var skillOpts = PYRAMID_SKILLS[rec.letter]||["(none listed)"];
+    var skillSel = selectEl(skillOpts, rec.skill, function(v){ rec.skill=v; save(); });
+    var r = el("div",{class:"row"});
+    r.appendChild(field("Value letter", letterSel));
+    r.appendChild(field("Specific skill", skillSel));
+    card.appendChild(r);
+    var r2 = el("div",{class:"row"});
+    r2.appendChild(field("Base(s)", athletePicker(rec.base, function(a){ rec.base=a; })));
+    r2.appendChild(field("Mid", athletePicker(rec.mid, function(a){ rec.mid=a; })));
+    r2.appendChild(field("Flyer(s)", athletePicker(rec.flyer, function(a){ rec.flyer=a; })));
+    card.appendChild(r2);
+    var v = PYRAMID_VALUES[level][rec.letter]||0;
+    rec._value = v;
+    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Letter "+rec.letter]), el("span",{class:"val"},["+"+v.toFixed(1)]) ]));
+    if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove element"]));
+    if(!__initial && typeof onUpdate==="function") onUpdate();
+    __initial = false;
+  }
+  render();
+  return card;
+}
+
+function tossSkillCard(rec, level, onRemove, title, onUpdate){
+  var options = TOSS_VALUES[level];
+  rec.skill = rec.skill || Object.keys(options)[0];
+  rec.base = rec.base||[]; rec.flyer = rec.flyer||[];
+  var card = el("div",{class:"card"});
+  var __initial = true;
+  function render(){
+    card.innerHTML="";
+    card.appendChild(el("h3",{},[title||"Toss"]));
+    var sel = selectEl(Object.keys(options).map(function(k){ return [k, k+"  ("+options[k].toFixed(1)+")"]; }), rec.skill, function(v){ rec.skill=v; render(); save(); });
+    card.appendChild(el("div",{class:"row"},[ field("Toss skill", sel) ]));
+    var r2 = el("div",{class:"row"});
+    r2.appendChild(field("Base(s)", athletePicker(rec.base, function(a){ rec.base=a; })));
+    r2.appendChild(field("Flyer(s)", athletePicker(rec.flyer, function(a){ rec.flyer=a; })));
+    card.appendChild(r2);
+    var v = options[rec.skill];
+    rec._value = v;
+    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Whole-skill value"]), el("span",{class:"val"},[v.toFixed(1)]) ]));
+    if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove toss"]));
+    if(!__initial && typeof onUpdate==="function") onUpdate();
+    __initial = false;
+  }
+  render();
+  return card;
+}
+
+function tumblePassCard(rec, level, onRemove, title, onUpdate){
+  rec.mode = rec.mode || "standing";
+  rec.athletes = rec.athletes || [];
+  var card = el("div",{class:"card"});
+  var __initial = true;
+  function render(){
+    card.innerHTML="";
+    card.appendChild(el("h3",{},[title||"Tumbling Pass"]));
+    var modeSel = selectEl([["standing","Standing Tumbling (named combo)"],["running","Running Tumbling (build pass)"]], rec.mode, function(v){ rec.mode=v; render(); save(); });
+    card.appendChild(el("div",{class:"row"},[ field("Mode", modeSel) ]));
+    var val = 0;
+    if(rec.mode==="standing"){
+      var list = STANDING_TUMBLE[level];
+      rec.combo = rec.combo || list[0][1];
+      var combo = selectEl(list.map(function(p){ return [p[1], p[1]+"  ("+p[0].toFixed(2)+")"]; }), rec.combo, function(v){ rec.combo=v; render(); save(); });
+      card.appendChild(el("div",{class:"row"},[ field("Skill / combination", combo) ]));
+      var found = list.filter(function(p){ return p[1]===rec.combo; })[0];
+      val = found? found[0] : 0;
+    } else {
+      rec.entry = rec.entry || Object.keys(RUN_ENTRY)[0];
+      rec.t1 = rec.t1 || "(none)";
+      rec.t2 = rec.t2 || "(none)";
+      rec.dismount = rec.dismount || Object.keys(RUN_DISMOUNT)[0];
+      var r1 = el("div",{class:"row"});
+      r1.appendChild(field("Entry skill", selectEl(Object.keys(RUN_ENTRY), rec.entry, function(v){ rec.entry=v; render(); save(); })));
+      r1.appendChild(field("Transition 1", selectEl(["(none)"].concat(Object.keys(RUN_TRANS)), rec.t1, function(v){ rec.t1=v; render(); save(); })));
+      card.appendChild(r1);
+      var r2 = el("div",{class:"row"});
+      r2.appendChild(field("Transition 2", selectEl(["(none)"].concat(Object.keys(RUN_TRANS)), rec.t2, function(v){ rec.t2=v; render(); save(); })));
+      r2.appendChild(field("Dismount", selectEl(Object.keys(RUN_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      card.appendChild(r2);
+      var t1v = rec.t1!=="(none)" ? RUN_TRANS[rec.t1] : 0;
+      var t2v = rec.t2!=="(none)" ? RUN_TRANS[rec.t2] : 0;
+      var doubled = rec.t2!=="(none)" && RUN_DISMOUNT[rec.dismount] >= 0.3; // 2nd transition into flipping dismount counts double
+      if(doubled) t2v = t2v*2;
+      val = RUN_ENTRY[rec.entry] + t1v + t2v + RUN_DISMOUNT[rec.dismount];
+      card.appendChild(el("div",{class:"breakdown"},["Entry "+RUN_ENTRY[rec.entry]+" + T1 "+t1v+" + T2 "+t2v+(doubled?" (doubled)":"")+" + Dismount "+RUN_DISMOUNT[rec.dismount]]));
+    }
+    var r3 = el("div",{class:"row"},[ field("Athlete(s)", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]);
+    card.appendChild(r3);
+    rec._value = val;
+    card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Pass value"]), el("span",{class:"val"},[val.toFixed(2)]) ]));
+    if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove pass"]));
+    if(!__initial && typeof onUpdate==="function") onUpdate();
+    __initial = false;
+  }
+  render();
+  return card;
+}
+
+/* ---------------- Views ---------------- */
+function viewCompulsory(container){
+  var lvl = state.level;
+  var bucket = getBucket(["compulsory", lvl]);
+  Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
+    container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},[eventName+" Compulsory"]), el("span",{class:"req"},["Start Value 10.0"]) ]));
+    bucket[eventName] = bucket[eventName] || {};
+    COMPULSORY[lvl][eventName].forEach(function(skillName, idx){
+      var key = "s"+idx;
+      bucket[eventName][key] = bucket[eventName][key] || {g1:[], g2:[]};
+      var rec = bucket[eventName][key];
+      var card = el("div",{class:"card"});
+      card.appendChild(el("h3",{},[skillName]));
+      var r = el("div",{class:"row"});
+      r.appendChild(field("Group 1", athletePicker(rec.g1, function(a){ rec.g1=a; })));
+      r.appendChild(field("Group 2", athletePicker(rec.g2, function(a){ rec.g2=a; })));
+      card.appendChild(r);
+      container.appendChild(card);
+    });
+  });
+  container.appendChild(el("div",{class:"totalbar"},[
+    el("span",{class:"lbl"},["Each compulsory event"]), el("span",{class:"big"},["10.0"])
+  ]));
+  save();
+}
+
+function refreshOptional(){ var app=document.getElementById("app"); app.innerHTML=""; viewOptional(app); }
+function viewOptional(container){
+  var lvl = state.level;
+  var bucket = getBucket(["optional", lvl]);
+
+  // Acro
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Acro — Optional"]), el("span",{class:"req"},[OPT_ELEMENTS[lvl]+" solo elements · base "+OPT_BASE[lvl].Acro.toFixed(1)]) ]));
+  bucket.acro = bucket.acro || [];
+  while(bucket.acro.length < OPT_ELEMENTS[lvl]) bucket.acro.push({});
+  var acroTotal = OPT_BASE[lvl].Acro;
+  bucket.acro.slice(0, OPT_ELEMENTS[lvl]).forEach(function(rec, i){
+    container.appendChild(acroSkillCard(rec, null, "Element "+(i+1), refreshOptional));
+    acroTotal += rec._value||0;
+  });
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Acro optional score"]), el("span",{class:"big"},[acroTotal.toFixed(2)]) ]));
+
+  // Pyramid
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Pyramid — Optional"]), el("span",{class:"req"},["2 pyramids · base "+OPT_BASE[lvl].Pyramid.toFixed(1)]) ]));
+  bucket.pyramid = bucket.pyramid || [];
+  while(bucket.pyramid.length < 2) bucket.pyramid.push({});
+  var pyrTotal = OPT_BASE[lvl].Pyramid;
+  bucket.pyramid.slice(0,2).forEach(function(rec,i){
+    container.appendChild(pyramidSkillCard(rec, lvl, null, "Pyramid "+(i+1), refreshOptional));
+    pyrTotal += rec._value||0;
+  });
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Pyramid optional score"]), el("span",{class:"big"},[pyrTotal.toFixed(2)]) ]));
+
+  // Toss
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced + 1 solo · whole-skill, no base SV"]) ]));
+  bucket.toss = bucket.toss || {};
+  bucket.toss.synced = bucket.toss.synced || {};
+  bucket.toss.solo = bucket.toss.solo || {};
+  container.appendChild(tossSkillCard(bucket.toss.synced, lvl, null, "Synced Toss", refreshOptional));
+  container.appendChild(tossSkillCard(bucket.toss.solo, lvl, null, "Solo Toss", refreshOptional));
+  var tossTotal = (bucket.toss.synced._value||0) + (bucket.toss.solo._value||0);
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Toss optional score"]), el("span",{class:"big"},[tossTotal.toFixed(2)]) ]));
+
+  // Tumbling
+  var req = TUMBLE_OPT[lvl];
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Tumbling — Optional"]), el("span",{class:"req"},[req.solo+" Solo, "+req.duo+" Duo, "+req.trio+" Trio, "+req.quad+" Quad · average of passes"]) ]));
+  bucket.tumbling = bucket.tumbling || [];
+  var labels = [];
+  for(var s=1;s<=req.solo;s++) labels.push("Solo Pass "+s);
+  labels.push("Duo Pass","Trio Pass","Quad Pass");
+  while(bucket.tumbling.length < labels.length) bucket.tumbling.push({});
+  var sum=0, n=0;
+  bucket.tumbling.slice(0,labels.length).forEach(function(rec,i){
+    container.appendChild(tumblePassCard(rec, lvl, null, labels[i], refreshOptional));
+    sum += rec._value||0; n++;
+  });
+  var avg = n? sum/n : 0;
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Tumbling optional — average of "+n+" passes"]), el("span",{class:"big"},[avg.toFixed(2)]) ]));
+
+  save();
+}
+
+function viewTeam(container){
+  var lvl = state.level;
+  var bucket = getBucket(["team", lvl]);
+  bucket.segments = bucket.segments || [];
+
+  // Requirement tally
+  var tally = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ tally[k]={n:0,synced:0}; });
+  bucket.segments.forEach(function(seg){
+    if(tally[seg.category]){ tally[seg.category].n++; if(seg.synced) tally[seg.category].synced++; }
+  });
+
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Team Routine Requirements"]), el("span",{class:"req"},["Level "+lvl]) ]));
+  var grid = el("div",{class:"reqgrid"});
+  Object.keys(TEAM_REQ[lvl]).forEach(function(cat){
+    var r = TEAM_REQ[lvl][cat], t = tally[cat];
+    var met = t.n>=r.n && t.synced>=r.synced;
+    grid.appendChild(el("div",{class:"reqcard"},[
+      el("span",{class:"name"},[cat+" — "+r.n+" elements"+(r.synced?", min "+r.synced+" synced":"")]),
+      el("span",{class:"status "+(met?"met":"pending")},[ el("span",{class:"dot "+(met?"met":"pending")}), t.n+"/"+r.n+(r.synced? " · "+t.synced+"/"+r.synced+" synced":"") ])
+    ]));
+  });
+  container.appendChild(grid);
+
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Segments"]) ]));
+  var runningTotal = 0, segCount = {};
+  bucket.segments.forEach(function(seg, idx){
+    seg.category = seg.category || "Acro";
+    seg.synced = !!seg.synced;
+    seg.skill = seg.skill || {};
+    var card = el("div",{class:"card"});
+    var header = el("div",{class:"row"});
+    header.appendChild(field("Segment "+(idx+1)+" — Category", selectEl(Object.keys(TEAM_REQ[lvl]), seg.category, function(v){ seg.category=v; seg.skill={}; renderTeam(); save(); })));
+    var syncLabel = el("label",{class:"checkline"});
+    var syncCb = el("input",{type:"checkbox"}); syncCb.checked = seg.synced;
+    syncCb.addEventListener("change", function(){ seg.synced = syncCb.checked; save(); renderTeam(); });
+    syncLabel.appendChild(syncCb); syncLabel.appendChild(document.createTextNode(" Synchronized"));
+    header.appendChild(el("div",{class:"field"},[el("label",{},["Synced?"]), syncLabel]));
+    card.appendChild(header);
+
+    var inner;
+    if(seg.category==="Pyramid") inner = pyramidSkillCard(seg.skill, lvl, null, "Skill");
+    else if(seg.category==="Toss") inner = tossSkillCard(seg.skill, lvl, null, "Skill");
+    else if(seg.category==="Standing Tumbling" || seg.category==="Running Tumbling") inner = tumblePassCard(seg.skill, lvl, null, "Skill");
+    else inner = acroSkillCard(seg.skill, null, "Skill");
+    inner.style.border = "none"; inner.style.padding = "0"; inner.style.margin = "4px 0 0";
+    card.appendChild(inner);
+
+    card.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){ bucket.segments.splice(idx,1); save(); renderTeam(); }},["Remove segment"]));
+    container.appendChild(card);
+  });
+
+  var addBtn = el("button",{class:"ghostbtn", type:"button", onclick:function(){
+    bucket.segments.push({category:"Acro", synced:false, skill:{}});
+    save(); renderTeam();
+  }},["+ Add segment"]);
+  container.appendChild(addBtn);
+  save();
+}
+
+/* ---------------- Export ---------------- */
+function buildExportText(){
+  var lvl = state.level;
+  var lines = [];
+  lines.push("LEVEL "+lvl+" TEAM — SCORE SUMMARY");
+  lines.push("=".repeat(44));
+  var c = state.data.compulsory && state.data.compulsory[lvl];
+  if(c){
+    lines.push("\nCOMPULSORY (SV 10.0 each)");
+    Object.keys(COMPULSORY[lvl]).forEach(function(ev){
+      lines.push("\n"+ev+":");
+      COMPULSORY[lvl][ev].forEach(function(name, idx){
+        var rec = c[ev] && c[ev]["s"+idx];
+        lines.push("  "+name);
+        if(rec) lines.push("    Group 1: "+(rec.g1.join(", ")||"—")+"   Group 2: "+(rec.g2.join(", ")||"—"));
+      });
+    });
+  }
+  var o = state.data.optional && state.data.optional[lvl];
+  if(o){
+    lines.push("\n\nOPTIONAL");
+    if(o.acro){
+      var at = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ at += r._value||0; });
+      lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" → total "+at.toFixed(2));
+      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:"")+" → +"+(r._value||0).toFixed(1)+"   ["+ (r.athletes||[]).join(", ") +"]"); });
+    }
+    if(o.pyramid){
+      var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
+      lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" → total "+pt.toFixed(2));
+      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+r.skill+" (letter "+r.letter+") → +"+(r._value||0).toFixed(1)+"   base:["+(r.base||[]).join(", ")+"] mid:["+(r.mid||[]).join(", ")+"] flyer:["+(r.flyer||[]).join(", ")+"]"); });
+    }
+    if(o.toss){
+      var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
+      lines.push("\nToss — total "+tt.toFixed(2));
+      lines.push("  Synced: "+o.toss.synced.skill+" ("+(o.toss.synced._value||0).toFixed(1)+")   ["+(o.toss.synced.base||[]).concat(o.toss.synced.flyer||[]).join(", ")+"]");
+      lines.push("  Solo: "+o.toss.solo.skill+" ("+(o.toss.solo._value||0).toFixed(1)+")   ["+(o.toss.solo.base||[]).concat(o.toss.solo.flyer||[]).join(", ")+"]");
+    }
+    if(o.tumbling){
+      var sum=0; o.tumbling.forEach(function(r){ sum+= r._value||0; });
+      var avg = o.tumbling.length? sum/o.tumbling.length:0;
+      lines.push("\nTumbling — average of "+o.tumbling.length+" passes = "+avg.toFixed(2));
+      o.tumbling.forEach(function(r,i){ lines.push("  Pass "+(i+1)+" ("+r.mode+"): value "+(r._value||0).toFixed(2)+"   ["+(r.athletes||[]).join(", ")+"]"); });
+    }
+  }
+  var t = state.data.team && state.data.team[lvl];
+  if(t && t.segments && t.segments.length){
+    lines.push("\n\nTEAM ROUTINE SEGMENTS");
+    t.segments.forEach(function(seg, i){
+      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced)":"")+" — "+(seg.skill && (seg.skill.skill || seg.skill.combo || seg.skill.entry) || ""));
+    });
+  }
+  return lines.join("\n");
+}
+function viewExport(container){
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Export for Judges"]) ]));
+  container.appendChild(el("div",{class:"hint"},["Copy this summary to paste into a judges' sheet, or use your browser's print (Ctrl/Cmd+P) to save this page as a PDF."]));
+  var box = el("textarea",{class:"exportbox", readonly:"readonly"});
+  box.value = buildExportText();
+  container.appendChild(box);
+  var copyBtn = el("button",{class:"ghostbtn", type:"button", onclick:function(){
+    box.select();
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(box.value).then(function(){ copyBtn.textContent="Copied!"; setTimeout(function(){copyBtn.textContent="Copy summary";},1500); }).catch(function(){});
+    }
+  }},["Copy summary"]);
+  container.appendChild(copyBtn);
+}
+
+/* ---------------- Top nav + render ---------------- */
+function renderNav(){
+  var roundTabs = document.getElementById("roundTabs");
+  roundTabs.innerHTML = "";
+  [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","Export"]].forEach(function(r){
+    var t = el("button",{class:"tab"+(state.round===r[0]?" active":""), type:"button", onclick:function(){ state.round=r[0]; renderAll(); }},[r[1]]);
+    roundTabs.appendChild(t);
+  });
+  var levelPills = document.getElementById("levelPills");
+  levelPills.innerHTML = "";
+  [3,4].forEach(function(l){
+    var p = el("button",{class:"pill"+(state.level===l?" active":""), type:"button", onclick:function(){ state.level=l; renderAll(); }},["Level "+l]);
+    levelPills.appendChild(p);
+  });
+}
+function renderTeam(){ var app=document.getElementById("app"); app.innerHTML=""; viewTeam(app); }
+function renderAll(){
+  renderNav();
+  var app = document.getElementById("app");
+  app.innerHTML = "";
+  if(state.round==="compulsory") viewCompulsory(app);
+  else if(state.round==="optional") viewOptional(app);
+  else if(state.round==="team") viewTeam(app);
+  else viewExport(app);
+}
+
+load();
+function start(){ renderAll(); }
+if(window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(start); else start();
+})();
+</script>
