@@ -469,7 +469,7 @@ var RUN_DISMOUNT = {"Back Handspring Rebound":0.1,"Front Handspring Rebound":0.2
   "Front Full":1.2,"Back 1.5 Twist":1.3,"Front 1.5 Twist":1.4};
 
 /* ---------------- State ---------------- */
-var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:"", mode:"edit", practiceRound:"compulsory", practiceSub:"Acro"};
+var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:"", mode:"edit", practiceRound:"compulsory", practiceSub:"Acro", teamSize:{}};
 function load(){
   try{
     var raw = localStorage.getItem("acroScoreBuilder_v1");
@@ -477,11 +477,12 @@ function load(){
       var saved = JSON.parse(raw);
       state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; state.mode = saved.mode||"edit";
       state.practiceRound = saved.practiceRound||"compulsory"; state.practiceSub = saved.practiceSub||"Acro";
+      state.teamSize = saved.teamSize||{};
     }
   }catch(e){}
 }
 function save(){
-  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub})); }catch(e){}
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub, teamSize:state.teamSize})); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -774,7 +775,7 @@ function acroSkillCard(rec, onRemove, title, onUpdate, hideRoles){
       var roleRow = el("div",{class:"row"});
       roleRow.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
       roleRow.appendChild(rolePicker(rec, "frontBase", "Front Base"));
-      roleRow.appendChild(rolePicker(rec, "backBase", "Back Base"));
+      roleRow.appendChild(rolePicker(rec, "backBase", "Back Base(s)"));
       roleRow.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
       card.appendChild(roleRow);
     }
@@ -860,7 +861,7 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
       var r2 = el("div",{class:"row"});
       r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
       r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
-      r2.appendChild(rolePicker(rec, "backBase", "Back Base"));
+      r2.appendChild(rolePicker(rec, "backBase", "Back Base(s)"));
       r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
       card.appendChild(r2);
     }
@@ -939,9 +940,51 @@ function groupRoleBlock(rec, prefix, label){
   var row = el("div",{class:"row"});
   row.appendChild(rolePicker(rec, prefix+"SideBase", "Side Base(s)"));
   row.appendChild(rolePicker(rec, prefix+"FrontBase", "Front Base"));
-  row.appendChild(rolePicker(rec, prefix+"BackBase", "Back Base"));
+  row.appendChild(rolePicker(rec, prefix+"BackBase", "Back Base(s)"));
   row.appendChild(rolePicker(rec, prefix+"Flyer", "Flyer(s)"));
   block.appendChild(row);
+  return block;
+}
+/* Pyramid groups use Bottom Base(s)/Mid(s)/Flyer(s) — not the Acro/Toss
+   Side-Front-Back-Flyer set. There's no sync/group-type concept for pyramids
+   in Compulsory or Optional (that only exists if a team chooses a synced
+   pyramid moment in Team Routine, via that tab's own Synchronized checkbox). */
+function pyramidGroupRoleBlock(rec, prefix, label){
+  var block = el("div",{});
+  block.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:12px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},[label]));
+  var row = el("div",{class:"row"});
+  row.appendChild(rolePicker(rec, prefix+"BottomBase", "Bottom Base(s)"));
+  row.appendChild(rolePicker(rec, prefix+"Mid", "Mid(s)"));
+  row.appendChild(rolePicker(rec, prefix+"Flyer", "Flyer(s)"));
+  block.appendChild(row);
+  return block;
+}
+/* Compulsory tumbling has no bases/mids/flyers at all — just a required
+   number of tumblers performing the pass, where the required count is the
+   team's roster size for this level, divided by 2 and rounded down
+   (e.g. 11 athletes → 5 tumblers). */
+function requiredTumblers(lvl){
+  var size = (state.teamSize && state.teamSize[lvl]) || ATHLETES.length;
+  return Math.floor(size/2);
+}
+function tumblerGroupBlock(rec, label, required){
+  rec.tumblers = rec.tumblers || [];
+  var block = el("div",{});
+  block.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:12px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},[label]));
+  var status = el("div",{class:"status", style:"margin-top:8px;"});
+  var dot = el("span",{class:"dot"});
+  var text = document.createTextNode("");
+  status.appendChild(dot); status.appendChild(text);
+  function paintStatus(){
+    var count = rec.tumblers.length;
+    var met = count>=required;
+    status.className = "status "+(met?"met":"pending");
+    dot.className = "dot "+(met?"met":"pending");
+    text.textContent = count+"/"+required+" tumblers assigned";
+  }
+  block.appendChild(athletePicker(rec.tumblers, function(a){ rec.tumblers=a; save(); paintStatus(); }));
+  paintStatus();
+  block.appendChild(status);
   return block;
 }
 function refreshCompulsory(){ var app=document.getElementById("app"); app.innerHTML=""; viewCompulsory(app); }
@@ -953,6 +996,25 @@ function viewCompulsory(container){
     bucket[eventName] = bucket[eventName] || {};
     var evBucket = bucket[eventName];
     var skillNames = COMPULSORY[lvl][eventName];
+
+    if(eventName==="Tumbling"){
+      state.teamSize = state.teamSize || {};
+      if(!state.teamSize[lvl]) state.teamSize[lvl] = ATHLETES.length;
+      var sizeRow = el("div",{class:"row", style:"margin-bottom:10px;"});
+      sizeRow.appendChild(field("Team size — Level "+lvl+" (sets required tumblers)",
+        (function(){
+          var input = el("input",{type:"number", min:"0", value:String(state.teamSize[lvl])});
+          input.addEventListener("change", function(){
+            state.teamSize[lvl] = Math.max(0, parseInt(input.value,10)||0);
+            save(); refreshCompulsory();
+          });
+          return input;
+        })()
+      ));
+      container.appendChild(sizeRow);
+      container.appendChild(el("div",{class:"hint"},["Required tumblers per pass = floor(team size ÷ 2) = "+requiredTumblers(lvl)+". Example: 11 → 5.5 → 5."]));
+    }
+
     // "order" holds display/performance order as a permutation of the fixed
     // skill-name indices, so dragging a card never changes which required
     // skill its roles belong to — only the order the cards (and athletes) show in.
@@ -968,8 +1030,15 @@ function viewCompulsory(container){
       var card = el("div",{class:"card"});
       addDragHandle(card);
       card.appendChild(el("h3",{},[skillName]));
-      card.appendChild(groupRoleBlock(rec, "g1", "Group 1"));
-      card.appendChild(groupRoleBlock(rec, "g2", "Group 2"));
+      if(eventName==="Pyramid"){
+        card.appendChild(pyramidGroupRoleBlock(rec, "g1", "Pyramid 1"));
+        card.appendChild(pyramidGroupRoleBlock(rec, "g2", "Pyramid 2"));
+      } else if(eventName==="Tumbling"){
+        card.appendChild(tumblerGroupBlock(rec, "Tumblers performing this pass", requiredTumblers(lvl)));
+      } else {
+        card.appendChild(groupRoleBlock(rec, "g1", "Group 1"));
+        card.appendChild(groupRoleBlock(rec, "g2", "Group 2"));
+      }
       eventWrap.appendChild(card);
     });
     container.appendChild(eventWrap);
@@ -1105,7 +1174,7 @@ function instanceRoleFields(category, inst){
   } else {
     fields.push(rolePicker(inst, "sideBase", "Side Base(s)"));
     fields.push(rolePicker(inst, "frontBase", "Front Base"));
-    fields.push(rolePicker(inst, "backBase", "Back Base"));
+    fields.push(rolePicker(inst, "backBase", "Back Base(s)"));
     fields.push(rolePicker(inst, "flyer", "Flyer(s)"));
   }
   return fields;
@@ -1119,6 +1188,7 @@ function viewTeam(container){
   // toward the category total (that's how the real judge sheet counts them).
   var tally = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ tally[k]={n:0,synced:0}; });
   bucket.segments.forEach(function(seg){
+    if(seg.filler) return; // filler segments don't count toward requirements
     if(tally[seg.category]){
       var cnt = (seg.instances && seg.instances.length) || 1;
       tally[seg.category].n += cnt;
@@ -1143,11 +1213,16 @@ function viewTeam(container){
   bucket.segments.forEach(function(seg, idx){
     seg.category = seg.category || "Acro";
     seg.synced = !!seg.synced;
+    seg.filler = !!seg.filler;
     seg.skill = seg.skill || {};
     seg.instances = (seg.instances && seg.instances.length) ? seg.instances : [{}];
 
     var card = el("div",{class:"card segmentcard"});
     addDragHandle(card);
+    if(seg.filler){
+      card.appendChild(el("div",{style:"background:var(--warn); color:var(--accent-fg); font-weight:700; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; border-radius:7px; padding:6px 10px; margin-bottom:10px;"},
+        ["FILLER — not a required element, does not count toward requirements"]));
+    }
     var header = el("div",{class:"row"});
     header.appendChild(field("Segment "+(idx+1)+" — Category", selectEl(Object.keys(TEAM_REQ[lvl]), seg.category, function(v){ seg.category=v; seg.skill={}; seg.instances=[{}]; save(); renderTeam(); })));
     var syncLabel = el("label",{class:"checkline"});
@@ -1155,7 +1230,13 @@ function viewTeam(container){
     syncCb.addEventListener("change", function(){ seg.synced = syncCb.checked; save(); renderTeam(); });
     syncLabel.appendChild(syncCb); syncLabel.appendChild(document.createTextNode(" Synchronized"));
     header.appendChild(el("div",{class:"field"},[el("label",{},["Synced?"]), syncLabel]));
+    var fillerLabel = el("label",{class:"checkline"});
+    var fillerCb = el("input",{type:"checkbox"}); fillerCb.checked = seg.filler;
+    fillerCb.addEventListener("change", function(){ seg.filler = fillerCb.checked; save(); renderTeam(); });
+    fillerLabel.appendChild(fillerCb); fillerLabel.appendChild(document.createTextNode(" Filler (not judged)"));
+    header.appendChild(el("div",{class:"field"},[el("label",{},["Filler?"]), fillerLabel]));
     card.appendChild(header);
+    if(seg.filler) card.appendChild(el("div",{class:"hint"},["Marked filler — gives a less experienced/newer athlete a moment in the routine. It will still print on the judges' sheet, clearly labeled, but is excluded from your requirements tally and from the SV total."]));
 
     var inner;
     if(seg.category==="Pyramid") inner = pyramidSkillCard(seg.skill, lvl, null, "Skill", null, true);
@@ -1226,12 +1307,25 @@ function buildExportText(){
     lines.push("\nCOMPULSORY (SV 10.0 each)");
     Object.keys(COMPULSORY[lvl]).forEach(function(ev){
       lines.push("\n"+ev+":");
-      COMPULSORY[lvl][ev].forEach(function(name, idx){
-        var rec = c[ev] && c[ev]["s"+idx];
+      var skillNames = COMPULSORY[lvl][ev];
+      var evBucket = c[ev] || {};
+      var order = (Array.isArray(evBucket.order) && evBucket.order.length===skillNames.length)
+        ? evBucket.order : skillNames.map(function(_,i){ return i; });
+      order.forEach(function(idx){
+        var name = skillNames[idx];
+        var rec = evBucket["s"+idx];
         lines.push("  "+name);
         if(rec){
-          lines.push("    Group 1 — "+roleExport(rec,"g1SideBase","Side Base")+" "+roleExport(rec,"g1FrontBase","Front Base")+" "+roleExport(rec,"g1BackBase","Back Base")+" "+roleExport(rec,"g1Flyer","Flyer"));
-          lines.push("    Group 2 — "+roleExport(rec,"g2SideBase","Side Base")+" "+roleExport(rec,"g2FrontBase","Front Base")+" "+roleExport(rec,"g2BackBase","Back Base")+" "+roleExport(rec,"g2Flyer","Flyer"));
+          if(ev==="Pyramid"){
+            lines.push("    Pyramid 1 — "+roleExport(rec,"g1BottomBase","Bottom Base")+" "+roleExport(rec,"g1Mid","Mid")+" "+roleExport(rec,"g1Flyer","Flyer"));
+            lines.push("    Pyramid 2 — "+roleExport(rec,"g2BottomBase","Bottom Base")+" "+roleExport(rec,"g2Mid","Mid")+" "+roleExport(rec,"g2Flyer","Flyer"));
+          } else if(ev==="Tumbling"){
+            var req = requiredTumblers(lvl);
+            lines.push("    Tumblers — ["+(rec.tumblers||[]).join(", ")+"] ("+(rec.tumblers||[]).length+"/"+req+")");
+          } else {
+            lines.push("    Group 1 — "+roleExport(rec,"g1SideBase","Side Base")+" "+roleExport(rec,"g1FrontBase","Front Base")+" "+roleExport(rec,"g1BackBase","Back Base(s)")+" "+roleExport(rec,"g1Flyer","Flyer"));
+            lines.push("    Group 2 — "+roleExport(rec,"g2SideBase","Side Base")+" "+roleExport(rec,"g2FrontBase","Front Base")+" "+roleExport(rec,"g2BackBase","Back Base(s)")+" "+roleExport(rec,"g2Flyer","Flyer"));
+          }
         }
       });
     });
@@ -1242,7 +1336,7 @@ function buildExportText(){
     if(o.acro){
       var at = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ at += r._value||0; });
       lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" → total "+at.toFixed(2));
-      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(skillDesc(r) || (r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:""))+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base")+" "+roleExport(r,"flyer","Flyer")); });
+      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(skillDesc(r) || (r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:""))+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base(s)")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.pyramid){
       var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
@@ -1252,8 +1346,8 @@ function buildExportText(){
     if(o.toss){
       var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
       lines.push("\nToss — total "+tt.toFixed(2));
-      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
-      lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
+      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base(s)")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
+      lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base(s)")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
     }
     if(o.tumbling){
       var sum=0; o.tumbling.forEach(function(r){ sum+= r._value||0; });
@@ -1268,7 +1362,7 @@ function buildExportText(){
     t.segments.forEach(function(seg, i){
       var names = segmentPerformerGroupsText(seg);
       var groupCount = (seg.instances && seg.instances.length) || 1;
-      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced × "+groupCount+")":"")+" — "+teamSkillLabel(seg)+" → +"+((seg.skill && seg.skill._value)||0).toFixed(2));
+      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced × "+groupCount+")":"")+(seg.filler?" [FILLER — not judged, not counted]":"")+" — "+teamSkillLabel(seg)+" → +"+((seg.skill && seg.skill._value)||0).toFixed(2));
       lines.push("    "+(names || "(no athletes assigned yet)"));
     });
   }
@@ -1330,8 +1424,13 @@ function viewJudges(container){
 
   // ---- Compulsory ----
   wrap.appendChild(sheetTitle(lvl, "COMPULSORY"));
+  var cbucketJ = getBucket(["compulsory", lvl]);
   Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
-    var rows = COMPULSORY[lvl][eventName].map(function(name){ return {text:name}; });
+    var skillNames = COMPULSORY[lvl][eventName];
+    var evBucketJ = cbucketJ[eventName] || {};
+    var orderJ = (Array.isArray(evBucketJ.order) && evBucketJ.order.length===skillNames.length)
+      ? evBucketJ.order : skillNames.map(function(_,i){ return i; });
+    var rows = orderJ.map(function(idx){ return {text:skillNames[idx]}; });
     rows.push({text:"START VALUE 10.0", score:true});
     wrap.appendChild(judgeBlock(eventName.toUpperCase(), rows));
   });
@@ -1388,10 +1487,10 @@ function viewJudges(container){
     var rows = t.segments.map(function(seg){
       var names = segmentPerformerGroupsText(seg);
       var val = (seg.skill && seg.skill._value) || 0;
-      return {text: teamSkillLabel(seg) + (names?" ("+names+")":"") + "  "+val.toFixed(2)};
+      return {text: teamSkillLabel(seg) + (names?" ("+names+")":"") + (seg.filler?"  [FILLER — DO NOT JUDGE]":"  "+val.toFixed(2))};
     });
     var catValues = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ catValues[k]=[]; });
-    t.segments.forEach(function(seg){ if(catValues[seg.category]) catValues[seg.category].push((seg.skill&&seg.skill._value)||0); });
+    t.segments.forEach(function(seg){ if(!seg.filler && catValues[seg.category]) catValues[seg.category].push((seg.skill&&seg.skill._value)||0); });
     var avgParts = [], totalSV = 0;
     Object.keys(catValues).forEach(function(k){
       var arr = catValues[k];
@@ -1453,15 +1552,26 @@ function viewPracticeCompulsorySub(container, eventName){
   if(!Array.isArray(evBucket.order) || evBucket.order.length !== skillNames.length){
     evBucket.order = skillNames.map(function(_,i){ return i; });
   }
+  var required = eventName==="Tumbling" ? requiredTumblers(lvl) : null;
   evBucket.order.forEach(function(origIdx){
     var skillName = skillNames[origIdx];
     var key = "s"+origIdx;
     var rec = evBucket[key] || {};
-    var g1 = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
-    var g2 = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
     var lines = [];
-    if(g1) lines.push("GROUP 1 — "+g1);
-    if(g2) lines.push("GROUP 2 — "+g2);
+    if(eventName==="Pyramid"){
+      var g1 = practiceRoleLine(rec, [["g1BottomBase","Bottom"],["g1Mid","Mid"],["g1Flyer","Flyer"]]);
+      var g2 = practiceRoleLine(rec, [["g2BottomBase","Bottom"],["g2Mid","Mid"],["g2Flyer","Flyer"]]);
+      if(g1) lines.push("PYRAMID 1 — "+g1);
+      if(g2) lines.push("PYRAMID 2 — "+g2);
+    } else if(eventName==="Tumbling"){
+      var names = (rec.tumblers||[]).join(", ");
+      lines.push((names?("Tumblers: "+names):"No tumblers assigned yet")+"  ("+(rec.tumblers||[]).length+"/"+required+")");
+    } else {
+      var g1a = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
+      var g2a = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
+      if(g1a) lines.push("GROUP 1 — "+g1a);
+      if(g2a) lines.push("GROUP 2 — "+g2a);
+    }
     container.appendChild(practiceCard(skillName, eventName+" compulsory", lines.join("     ||     ")));
   });
 }
@@ -1510,7 +1620,7 @@ function viewPracticeTeam(container){
   }
   segs.forEach(function(seg, idx){
     var groupsTxt = segmentPerformerGroupsText(seg);
-    var title = (idx+1)+". "+seg.category+(seg.synced?" — SYNCED":"");
+    var title = (idx+1)+". "+seg.category+(seg.synced?" — SYNCED":"")+(seg.filler?" — FILLER":"");
     container.appendChild(practiceCard(title, teamSkillLabel(seg) || "(skill not set yet)", groupsTxt?("Performers: "+groupsTxt):""));
   });
 }
