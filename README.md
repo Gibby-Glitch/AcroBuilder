@@ -1,6 +1,8 @@
 # Ducks 2026-2027 Season — Acro Score Builder
 
-A single-page, dropdown-driven scoring tool for the Level 3/4 Acro team: Compulsory (fixed SV 10.0, base/flyer role assignment), Optional (Acro/Pyramid/Toss/Tumbling point-code calculators), and Team Routine (segment builder with a live requirements checklist). Includes a plain-text export view for judges.
+A single-page, dropdown-driven scoring tool for the Level 3/4 Acro team: Compulsory (fixed SV 10.0, base/flyer role assignment), Optional (Acro/Pyramid/Toss/Tumbling point-code calculators), and Team Routine (segment builder — supports multiple synced performer groups per segment, up to 10, with move up/down ordering and a live requirements tally).
+
+Five tabs: **Compulsory**, **Optional**, **Team Routine**, **My Export** (a plain-text sheet for you — who's in what position, for your own reference), and **Judges** (a printable scoring-grid layout styled after a standard meet judges' sheet — skill names/descriptions, athlete names, and start values, with blank score boxes). On the Judges tab, use the **Print / Save as PDF** button (or Ctrl/Cmd+P) to print or save it for handing to judges at a meet.
 
 Any skill/score card has a "Skill/score not listed — enter manually" checkbox — check it to type in a custom skill name and point value instead of picking from the chart, for anything the booklet tables don't cover yet.
 

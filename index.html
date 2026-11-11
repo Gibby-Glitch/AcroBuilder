@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ducks 2026-2027 Season</title>
 <style>
-[hidden]{display:none !important;}
 
 /* Layout: sticky top nav (level/round tabs) over a single scrolling column of cards;
    each card is a self-contained "skill picker" widget reused across Optional/Team. */
@@ -141,9 +140,36 @@ textarea.exportbox{
   border-radius:10px; padding:12px; font-family:var(--font-mono); font-size:12px; line-height:1.6; white-space:pre;
 }
 .hint{font-size:12px; color:var(--fg-dim); margin:8px 0;}
+
+/* ---------- Judge sheet ---------- */
+.judgesheet{ background:#fff; color:#161616; border-radius:12px; padding:16px; border:1px solid var(--border); }
+.jsheettitle{
+  display:flex; flex-wrap:wrap; gap:6px 18px; align-items:baseline; justify-content:space-between;
+  border:3px solid #161616; border-radius:6px; padding:10px 14px; margin:18px 0 10px; font-family:var(--font-display);
+}
+.jsheettitle span:first-child{ font-size:20px; font-weight:700; }
+.jsheettitle span:nth-child(2){ font-size:16px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+.jsheettitle span:last-child{ font-size:13px; color:#444; }
+table.judgetable{ width:100%; border-collapse:collapse; margin-bottom:16px; font-size:12.5px; page-break-inside:avoid; }
+table.judgetable td{ border:1px solid #333; padding:7px 9px; vertical-align:middle; }
+table.judgetable tr.jhead td{ background:#f6cfc8; font-weight:700; text-align:center; color:#161616; }
+table.judgetable tr.jhead td.jlabelhead{ text-align:left; }
+table.judgetable td.jlabel{ text-align:left; }
+table.judgetable td.jscorelabel{ font-weight:700; }
+table.judgetable td.jblack{ background:#161616; }
+table.judgetable td.jscore{ text-align:center; font-weight:700; }
+table.judgetable td.jcol{ width:14%; }
+table.judgetable td.jlabelcol{ width:44%; }
 @media print{
   .topbar,.ghostbtn,.removebtn,select,input,.athletepicker{display:none !important;}
+  body{background:#fff !important;}
+  .judgesheet{border:none; padding:0;}
+  .judgesheet, .judgesheet *{ color:#161616 !important; }
+  table.judgetable tr.jhead td{ background:#f6cfc8 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  table.judgetable td.jblack{ background:#161616 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
+
+[hidden]{display:none !important;}
 
 .syncbadge{
   margin-left:auto; font-size:11px; font-weight:700; letter-spacing:.02em; text-transform:uppercase;
@@ -165,6 +191,11 @@ textarea.exportbox{
 .accessbox p{font-size:13px; color:var(--fg-dim); margin-bottom:16px;}
 .accessbox input{margin-bottom:10px; text-align:center;}
 .accesserror{color:var(--bad); font-size:12.5px; margin-top:10px;}
+.printbtn{
+  background:var(--accent); color:var(--accent-fg); border:none; border-radius:8px; padding:9px 16px;
+  font-size:13px; font-weight:700; margin:6px 0 16px;
+}
+@media print{ .printbtn{display:none !important;} }
 
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -246,6 +277,7 @@ function fbInit(){
       fbApplyingRemote = true;
       state.data = remote.data || {};
       state.uid = remote.uid || state.uid;
+      state.teamName = remote.teamName || state.teamName;
       try{ renderAll(); }catch(e){}
       fbApplyingRemote = false;
     }, function(err){
@@ -262,7 +294,7 @@ function fbPush(){
   if(!fbDocRef || fbApplyingRemote) return;
   clearTimeout(fbWriteTimer);
   fbWriteTimer = setTimeout(function(){
-    var payload = { data: state.data, uid: state.uid, _updatedAt: Date.now() };
+    var payload = { data: state.data, uid: state.uid, teamName: state.teamName, _updatedAt: Date.now() };
     fbLastPushedJSON = JSON.stringify(payload.data);
     fbDocRef.set(payload).catch(function(e){ console.warn("Sync push failed:", e); setSyncBadge("err"); });
   }, 500);
@@ -401,15 +433,15 @@ var RUN_DISMOUNT = {"Back Handspring Rebound":0.1,"Front Handspring Rebound":0.2
   "Front Full":1.2,"Back 1.5 Twist":1.3,"Front 1.5 Twist":1.4};
 
 /* ---------------- State ---------------- */
-var state = {round:"compulsory", level:3, uid:1, data:{}};
+var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:""};
 function load(){
   try{
     var raw = localStorage.getItem("acroScoreBuilder_v1");
-    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; }
+    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; }
   }catch(e){}
 }
 function save(){
-  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid})); }catch(e){}
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName})); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -539,7 +571,7 @@ function customNumericValue(rec){
 }
 
 /* ---------------- Acro skill picker (Hand Support / Walk-Pitch-Toss / Punk) ---------------- */
-function acroSkillCard(rec, onRemove, title, onUpdate){
+function acroSkillCard(rec, onRemove, title, onUpdate, hideRoles){
   rec.family = rec.family || "wpt";
   rec.entryGroup = rec.entryGroup || "Group (3+ bases)";
   rec.topGroup = rec.topGroup || "Group (3+ bases)";
@@ -642,12 +674,14 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
     scoreLabel = "Total points "+pts+" → "+cat[2];
     } // end !rec.custom
 
-    var roleRow = el("div",{class:"row"});
-    roleRow.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
-    roleRow.appendChild(rolePicker(rec, "frontBase", "Front Base"));
-    roleRow.appendChild(rolePicker(rec, "backBase", "Back Base"));
-    roleRow.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
-    card.appendChild(roleRow);
+    if(!hideRoles){
+      var roleRow = el("div",{class:"row"});
+      roleRow.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
+      roleRow.appendChild(rolePicker(rec, "frontBase", "Front Base"));
+      roleRow.appendChild(rolePicker(rec, "backBase", "Back Base"));
+      roleRow.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
+      card.appendChild(roleRow);
+    }
 
     rec._value = finalValue;
     var sl = el("div",{class:"scoreline"},[
@@ -665,7 +699,7 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
   return card;
 }
 
-function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
+function pyramidSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
   rec.letter = rec.letter || "A";
   rec.skill = rec.skill || PYRAMID_SKILLS["A"][0];
   var card = el("div",{class:"card"});
@@ -690,11 +724,13 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
       v = PYRAMID_VALUES[level][rec.letter]||0;
       scoreLabel = "Letter "+rec.letter;
     }
-    var r2 = el("div",{class:"row"});
-    r2.appendChild(rolePicker(rec, "bottomBase", "Bottom Base(s)"));
-    r2.appendChild(rolePicker(rec, "mid", "Mid(s)"));
-    r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
-    card.appendChild(r2);
+    if(!hideRoles){
+      var r2 = el("div",{class:"row"});
+      r2.appendChild(rolePicker(rec, "bottomBase", "Bottom Base(s)"));
+      r2.appendChild(rolePicker(rec, "mid", "Mid(s)"));
+      r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
+      card.appendChild(r2);
+    }
     rec._value = v;
     card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},[scoreLabel]), el("span",{class:"val"},["+"+v.toFixed(1)]) ]));
     if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove element"]));
@@ -705,7 +741,7 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
   return card;
 }
 
-function tossSkillCard(rec, level, onRemove, title, onUpdate){
+function tossSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
   var options = TOSS_VALUES[level];
   rec.skill = rec.skill || Object.keys(options)[0];
   var card = el("div",{class:"card"});
@@ -724,12 +760,14 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate){
       v = options[rec.skill];
       scoreLabel = "Whole-skill value";
     }
-    var r2 = el("div",{class:"row"});
-    r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
-    r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
-    r2.appendChild(rolePicker(rec, "backBase", "Back Base"));
-    r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
-    card.appendChild(r2);
+    if(!hideRoles){
+      var r2 = el("div",{class:"row"});
+      r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
+      r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
+      r2.appendChild(rolePicker(rec, "backBase", "Back Base"));
+      r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
+      card.appendChild(r2);
+    }
     rec._value = v;
     card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},[scoreLabel]), el("span",{class:"val"},[v.toFixed(1)]) ]));
     if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove toss"]));
@@ -740,7 +778,7 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate){
   return card;
 }
 
-function tumblePassCard(rec, level, onRemove, title, onUpdate){
+function tumblePassCard(rec, level, onRemove, title, onUpdate, hideRoles){
   rec.mode = rec.mode || "standing";
   rec.athletes = rec.athletes || [];
   var card = el("div",{class:"card"});
@@ -784,8 +822,10 @@ function tumblePassCard(rec, level, onRemove, title, onUpdate){
       card.appendChild(el("div",{class:"breakdown"},["Entry "+RUN_ENTRY[rec.entry]+" + T1 "+t1v+" + T2 "+t2v+(doubled?" (doubled)":"")+" + Dismount "+RUN_DISMOUNT[rec.dismount]]));
     }
     } // end !rec.custom
-    var r3 = el("div",{class:"row"},[ field("Athlete(s)", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]);
-    card.appendChild(r3);
+    if(!hideRoles){
+      var r3 = el("div",{class:"row"},[ field("Athlete(s)", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]);
+      card.appendChild(r3);
+    }
     rec._value = val;
     card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},["Pass value"]), el("span",{class:"val"},[val.toFixed(2)]) ]));
     if(onRemove) card.appendChild(el("button",{class:"removebtn", type:"button", onclick:onRemove},["Remove pass"]));
@@ -887,15 +927,65 @@ function viewOptional(container){
   save();
 }
 
+function instanceNames(inst){
+  var out=[];
+  ["sideBase","frontBase","backBase","flyer","bottomBase","mid","athletes"].forEach(function(k){
+    if(inst[k] && inst[k].length) out = out.concat(inst[k]);
+  });
+  return out;
+}
+function segmentPerformerGroupsText(seg){
+  var groups = (seg.instances||[]).map(instanceNames).filter(function(g){ return g.length; });
+  return groups.map(function(g){ return g.join("/"); }).join(", ");
+}
+function skillLabelFor(category, r){
+  r = r || {};
+  if(skillDesc(r)) return skillDesc(r);
+  if(category==="Pyramid") return r.skill || ("Letter "+(r.letter||""));
+  if(category==="Toss") return r.skill || "";
+  if(category==="Standing Tumbling" || category==="Running Tumbling" || category==="Tumbling"){
+    if(r.mode==="standing") return r.combo || "";
+    var parts=[r.entry];
+    if(r.t1 && r.t1!=="(none)") parts.push(r.t1);
+    if(r.t2 && r.t2!=="(none)") parts.push(r.t2);
+    if(r.dismount) parts.push(r.dismount);
+    return parts.filter(Boolean).join(" → ");
+  }
+  var parts=[r.entry, r.top];
+  if(r.dismount) parts.push(r.dismount);
+  return parts.filter(Boolean).join(" → ");
+}
+function teamSkillLabel(seg){ return skillLabelFor(seg.category, seg.skill||{}); }
+function instanceRoleFields(category, inst){
+  var fields = [];
+  if(category==="Pyramid"){
+    fields.push(rolePicker(inst, "bottomBase", "Bottom Base(s)"));
+    fields.push(rolePicker(inst, "mid", "Mid(s)"));
+    fields.push(rolePicker(inst, "flyer", "Flyer(s)"));
+  } else if(category==="Standing Tumbling" || category==="Running Tumbling"){
+    fields.push(rolePicker(inst, "athletes", "Athlete(s)"));
+  } else {
+    fields.push(rolePicker(inst, "sideBase", "Side Base(s)"));
+    fields.push(rolePicker(inst, "frontBase", "Front Base"));
+    fields.push(rolePicker(inst, "backBase", "Back Base"));
+    fields.push(rolePicker(inst, "flyer", "Flyer(s)"));
+  }
+  return fields;
+}
 function viewTeam(container){
   var lvl = state.level;
   var bucket = getBucket(["team", lvl]);
   bucket.segments = bucket.segments || [];
 
-  // Requirement tally
+  // Requirement tally - a synced moment performed by N groups at once counts N
+  // toward the category total (that's how the real judge sheet counts them).
   var tally = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ tally[k]={n:0,synced:0}; });
   bucket.segments.forEach(function(seg){
-    if(tally[seg.category]){ tally[seg.category].n++; if(seg.synced) tally[seg.category].synced++; }
+    if(tally[seg.category]){
+      var cnt = (seg.instances && seg.instances.length) || 1;
+      tally[seg.category].n += cnt;
+      if(seg.synced) tally[seg.category].synced += cnt;
+    }
   });
 
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Team Routine Requirements"]), el("span",{class:"req"},["Level "+lvl]) ]));
@@ -910,15 +1000,16 @@ function viewTeam(container){
   });
   container.appendChild(grid);
 
-  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Segments"]) ]));
-  var runningTotal = 0, segCount = {};
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Segments — in performance order"]) ]));
   bucket.segments.forEach(function(seg, idx){
     seg.category = seg.category || "Acro";
     seg.synced = !!seg.synced;
     seg.skill = seg.skill || {};
+    seg.instances = (seg.instances && seg.instances.length) ? seg.instances : [{}];
+
     var card = el("div",{class:"card"});
     var header = el("div",{class:"row"});
-    header.appendChild(field("Segment "+(idx+1)+" — Category", selectEl(Object.keys(TEAM_REQ[lvl]), seg.category, function(v){ seg.category=v; seg.skill={}; renderTeam(); save(); })));
+    header.appendChild(field("Segment "+(idx+1)+" — Category", selectEl(Object.keys(TEAM_REQ[lvl]), seg.category, function(v){ seg.category=v; seg.skill={}; seg.instances=[{}]; save(); renderTeam(); })));
     var syncLabel = el("label",{class:"checkline"});
     var syncCb = el("input",{type:"checkbox"}); syncCb.checked = seg.synced;
     syncCb.addEventListener("change", function(){ seg.synced = syncCb.checked; save(); renderTeam(); });
@@ -927,19 +1018,48 @@ function viewTeam(container){
     card.appendChild(header);
 
     var inner;
-    if(seg.category==="Pyramid") inner = pyramidSkillCard(seg.skill, lvl, null, "Skill");
-    else if(seg.category==="Toss") inner = tossSkillCard(seg.skill, lvl, null, "Skill");
-    else if(seg.category==="Standing Tumbling" || seg.category==="Running Tumbling") inner = tumblePassCard(seg.skill, lvl, null, "Skill");
-    else inner = acroSkillCard(seg.skill, null, "Skill");
+    if(seg.category==="Pyramid") inner = pyramidSkillCard(seg.skill, lvl, null, "Skill", null, true);
+    else if(seg.category==="Toss") inner = tossSkillCard(seg.skill, lvl, null, "Skill", null, true);
+    else if(seg.category==="Standing Tumbling" || seg.category==="Running Tumbling") inner = tumblePassCard(seg.skill, lvl, null, "Skill", null, true);
+    else inner = acroSkillCard(seg.skill, null, "Skill", null, true);
     inner.style.border = "none"; inner.style.padding = "0"; inner.style.margin = "4px 0 0";
     card.appendChild(inner);
 
-    card.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){ bucket.segments.splice(idx,1); save(); renderTeam(); }},["Remove segment"]));
+    card.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:14px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},
+      ["Who's performing this — add one block per synced group (up to 10)"]));
+    seg.instances.forEach(function(inst, ii){
+      var instWrap = el("div",{style:"border-top:1px dashed var(--border); padding-top:8px; margin-top:8px;"});
+      var instHeader = el("div",{style:"display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"});
+      instHeader.appendChild(el("span",{style:"font-size:12px;font-weight:700;color:var(--fg-dim);"},["Performer group "+(ii+1)]));
+      if(seg.instances.length>1){
+        instHeader.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){ seg.instances.splice(ii,1); save(); renderTeam(); }},["Remove group"]));
+      }
+      instWrap.appendChild(instHeader);
+      var instRow = el("div",{class:"row"});
+      instanceRoleFields(seg.category, inst).forEach(function(f){ instRow.appendChild(f); });
+      instWrap.appendChild(instRow);
+      card.appendChild(instWrap);
+    });
+    if(seg.instances.length < 10){
+      card.appendChild(el("button",{class:"ghostbtn", type:"button", onclick:function(){ seg.instances.push({}); save(); renderTeam(); }},
+        ["+ Add synced performer group ("+seg.instances.length+"/10)"]));
+    }
+
+    var moveRow = el("div",{style:"display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"});
+    if(idx>0) moveRow.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){
+      var tmp=bucket.segments[idx-1]; bucket.segments[idx-1]=bucket.segments[idx]; bucket.segments[idx]=tmp; save(); renderTeam();
+    }},["↑ Move up"]));
+    if(idx<bucket.segments.length-1) moveRow.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){
+      var tmp=bucket.segments[idx+1]; bucket.segments[idx+1]=bucket.segments[idx]; bucket.segments[idx]=tmp; save(); renderTeam();
+    }},["↓ Move down"]));
+    moveRow.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){ bucket.segments.splice(idx,1); save(); renderTeam(); }},["Remove segment"]));
+    card.appendChild(moveRow);
+
     container.appendChild(card);
   });
 
   var addBtn = el("button",{class:"ghostbtn", type:"button", onclick:function(){
-    bucket.segments.push({category:"Acro", synced:false, skill:{}});
+    bucket.segments.push({category:"Acro", synced:false, skill:{}, instances:[{}]});
     save(); renderTeam();
   }},["+ Add segment"]);
   container.appendChild(addBtn);
@@ -999,16 +1119,19 @@ function buildExportText(){
   }
   var t = state.data.team && state.data.team[lvl];
   if(t && t.segments && t.segments.length){
-    lines.push("\n\nTEAM ROUTINE SEGMENTS");
+    lines.push("\n\nTEAM ROUTINE SEGMENTS (in order)");
     t.segments.forEach(function(seg, i){
-      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced)":"")+" — "+(seg.skill && (skillDesc(seg.skill) || seg.skill.skill || seg.skill.combo || seg.skill.entry) || ""));
+      var names = segmentPerformerGroupsText(seg);
+      var groupCount = (seg.instances && seg.instances.length) || 1;
+      lines.push("\n"+(i+1)+". "+seg.category+(seg.synced?" (synced × "+groupCount+")":"")+" — "+teamSkillLabel(seg)+" → +"+((seg.skill && seg.skill._value)||0).toFixed(2));
+      lines.push("    "+(names || "(no athletes assigned yet)"));
     });
   }
   return lines.join("\n");
 }
 function viewExport(container){
-  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Export for Judges"]) ]));
-  container.appendChild(el("div",{class:"hint"},["Copy this summary to paste into a judges' sheet, or use your browser's print (Ctrl/Cmd+P) to save this page as a PDF."]));
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["My Export (athletes & positions)"]) ]));
+  container.appendChild(el("div",{class:"hint"},["This is your own copy — every skill with the athletes and roles you assigned, so you know who's in what position. For a blank scoring sheet to hand judges, use the Judges tab instead."]));
   var box = el("textarea",{class:"exportbox", readonly:"readonly"});
   box.value = buildExportText();
   container.appendChild(box);
@@ -1021,11 +1144,131 @@ function viewExport(container){
   container.appendChild(copyBtn);
 }
 
+/* ---------------- Judges tab (printable scoring sheet) ---------------- */
+function judgeBlock(headerLabel, rows){
+  var table = el("table",{class:"judgetable"});
+  table.appendChild(el("tr",{class:"jhead"},[
+    el("td",{class:"jlabelhead jlabelcol"},[headerLabel]),
+    el("td",{class:"jcol"},["FORM"]), el("td",{class:"jcol"},["EXECUTION"]), el("td",{class:"jcol"},["SYNC"]), el("td",{class:"jcol"},["S/F/M"])
+  ]));
+  rows.forEach(function(r){
+    if(r.score){
+      table.appendChild(el("tr",{},[
+        el("td",{class:"jlabel jscorelabel"},[r.text]),
+        el("td",{class:"jblack"},[]), el("td",{class:"jblack"},[]),
+        el("td",{class:"jscore"},["SCORE"]), el("td",{},[])
+      ]));
+    } else {
+      table.appendChild(el("tr",{},[
+        el("td",{class:"jlabel"},[r.text]),
+        el("td",{},[]), el("td",{},[]), el("td",{},[]), el("td",{},[])
+      ]));
+    }
+  });
+  return table;
+}
+function sheetTitle(lvl, sub){
+  return el("div",{class:"jsheettitle"},[
+    el("span",{},["LEVEL "+lvl]), el("span",{},[sub]), el("span",{},["TEAM: "+(state.teamName||"_____________")])
+  ]);
+}
+function viewJudges(container){
+  var lvl = state.level;
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Judge Sheet (printable)"]) ]));
+  var nameInput = el("input",{type:"text", placeholder:"Your team name"}); nameInput.value = state.teamName;
+  nameInput.addEventListener("input", function(){ state.teamName = nameInput.value; save(); renderAll(); });
+  container.appendChild(el("div",{class:"row"},[ field("Team name (appears on every sheet below)", nameInput) ]));
+  container.appendChild(el("div",{class:"hint"},["Switch to this tab, then use your browser's Print (Ctrl/Cmd+P) to save it as a PDF for judges — this view has no athlete names in Compulsory, and shows skill + athletes + start value everywhere else, same as a standard meet scoring sheet."]));
+  container.appendChild(el("button",{class:"printbtn", type:"button", onclick:function(){ window.print(); }},["Print / Save as PDF"]));
+
+  var wrap = el("div",{class:"judgesheet"});
+
+  // ---- Compulsory ----
+  wrap.appendChild(sheetTitle(lvl, "COMPULSORY"));
+  Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
+    var rows = COMPULSORY[lvl][eventName].map(function(name){ return {text:name}; });
+    rows.push({text:"START VALUE 10.0", score:true});
+    wrap.appendChild(judgeBlock(eventName.toUpperCase(), rows));
+  });
+
+  // ---- Optional ----
+  wrap.appendChild(sheetTitle(lvl, "OPTIONAL"));
+  var o = getBucket(["optional", lvl]);
+  if(o.acro && o.acro.length){
+    var acroRows = o.acro.map(function(r){
+      var names = instanceNames(r).join(", ");
+      return {text: skillLabelFor("Acro", r) + (names?" ("+names+")":"") + "  "+(r._value||0).toFixed(2)};
+    });
+    var acroTotal = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ acroTotal += r._value||0; });
+    acroRows.push({text:"START VALUE "+acroTotal.toFixed(2), score:true});
+    wrap.appendChild(judgeBlock("ACRO SKILLS ("+o.acro.length+")", acroRows));
+  }
+  if(o.pyramid && o.pyramid.length){
+    var pyrRows = o.pyramid.map(function(r){
+      var names = instanceNames(r).join(", ");
+      return {text: skillLabelFor("Pyramid", r) + (names?" ("+names+")":"") + "  "+(r._value||0).toFixed(2)};
+    });
+    var pyrTotal = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pyrTotal += r._value||0; });
+    pyrRows.push({text:"START VALUE "+pyrTotal.toFixed(2), score:true});
+    wrap.appendChild(judgeBlock("PYRAMID ("+o.pyramid.length+")", pyrRows));
+  }
+  if(o.toss && o.toss.synced){
+    var sNames = instanceNames(o.toss.synced).join(", "), oNames = instanceNames(o.toss.solo).join(", ");
+    var tossRows = [
+      {text: skillLabelFor("Toss", o.toss.synced)+" (sync)"+(sNames?" ("+sNames+")":"")+"  "+(o.toss.synced._value||0).toFixed(2)},
+      {text: skillLabelFor("Toss", o.toss.solo)+" (solo)"+(oNames?" ("+oNames+")":"")+"  "+(o.toss.solo._value||0).toFixed(2)}
+    ];
+    var tossTotal = (o.toss.synced._value||0)+(o.toss.solo._value||0);
+    tossRows.push({text:"START VALUE "+tossTotal.toFixed(2), score:true});
+    wrap.appendChild(judgeBlock("TOSS (1 SYNC / 1 SOLO)", tossRows));
+  }
+  if(o.tumbling && o.tumbling.length){
+    var tLabels = []; var req = TUMBLE_OPT[lvl];
+    for(var s=1;s<=req.solo;s++) tLabels.push("SOLO TUMBLING PASS");
+    tLabels.push("DUO PASS","TRIO PASS","QUAD PASS");
+    o.tumbling.forEach(function(r,i){
+      var names = instanceNames(r).join(", ");
+      var rows = [
+        {text: skillLabelFor("Tumbling", r) + (names?" ("+names+")":"")},
+        {text:"START VALUE "+(r._value||0).toFixed(2), score:true}
+      ];
+      wrap.appendChild(judgeBlock(tLabels[i]||"PASS", rows));
+    });
+  }
+
+  // ---- Team Routine ----
+  var t = getBucket(["team", lvl]);
+  if(t.segments && t.segments.length){
+    wrap.appendChild(sheetTitle(lvl, "TEAM ROUTINE"));
+    var rows = t.segments.map(function(seg){
+      var names = segmentPerformerGroupsText(seg);
+      var val = (seg.skill && seg.skill._value) || 0;
+      return {text: teamSkillLabel(seg) + (names?" ("+names+")":"") + "  "+val.toFixed(2)};
+    });
+    var catValues = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ catValues[k]=[]; });
+    t.segments.forEach(function(seg){ if(catValues[seg.category]) catValues[seg.category].push((seg.skill&&seg.skill._value)||0); });
+    var avgParts = [], totalSV = 0;
+    Object.keys(catValues).forEach(function(k){
+      var arr = catValues[k];
+      if(arr.length){
+        var avg = arr.reduce(function(a,b){return a+b;},0)/arr.length;
+        avgParts.push("avg "+k.toLowerCase()+" "+avg.toFixed(2));
+        totalSV += avg;
+      }
+    });
+    rows.push({text: (avgParts.join(", ")||"(no segments scored yet)") });
+    rows.push({text:"SV: "+totalSV.toFixed(2), score:true});
+    wrap.appendChild(judgeBlock("SKILLS — IN ORDER", rows));
+  }
+
+  container.appendChild(wrap);
+}
+
 /* ---------------- Top nav + render ---------------- */
 function renderNav(){
   var roundTabs = document.getElementById("roundTabs");
   roundTabs.innerHTML = "";
-  [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","Export"]].forEach(function(r){
+  [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","My Export"],["judges","Judges"]].forEach(function(r){
     var t = el("button",{class:"tab"+(state.round===r[0]?" active":""), type:"button", onclick:function(){ state.round=r[0]; renderAll(); }},[r[1]]);
     roundTabs.appendChild(t);
   });
@@ -1044,6 +1287,7 @@ function renderAll(){
   if(state.round==="compulsory") viewCompulsory(app);
   else if(state.round==="optional") viewOptional(app);
   else if(state.round==="team") viewTeam(app);
+  else if(state.round==="judges") viewJudges(app);
   else viewExport(app);
 }
 
