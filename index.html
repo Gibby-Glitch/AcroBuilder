@@ -469,15 +469,19 @@ var RUN_DISMOUNT = {"Back Handspring Rebound":0.1,"Front Handspring Rebound":0.2
   "Front Full":1.2,"Back 1.5 Twist":1.3,"Front 1.5 Twist":1.4};
 
 /* ---------------- State ---------------- */
-var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:"", mode:"edit"};
+var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:"", mode:"edit", practiceRound:"compulsory", practiceSub:"Acro"};
 function load(){
   try{
     var raw = localStorage.getItem("acroScoreBuilder_v1");
-    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; state.mode = saved.mode||"edit"; }
+    if(raw){
+      var saved = JSON.parse(raw);
+      state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; state.mode = saved.mode||"edit";
+      state.practiceRound = saved.practiceRound||"compulsory"; state.practiceSub = saved.practiceSub||"Acro";
+    }
   }catch(e){}
 }
 function save(){
-  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode})); }catch(e){}
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub})); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -1426,63 +1430,79 @@ function practiceCard(title, sub, roleLine){
   return card;
 }
 function practiceSection(label){ return el("div",{class:"psection"},[label]); }
-function viewPractice(container){
+var PRACTICE_SUBCATS = ["Acro","Pyramid","Toss","Tumbling"];
+function practiceSubTabs(container, current, onSelect){
+  var row = el("div",{class:"subrow", style:"margin:0 0 14px;"});
+  PRACTICE_SUBCATS.forEach(function(opt){
+    row.appendChild(el("button",{class:"pill"+(current===opt?" active":""), type:"button", onclick:function(){ onSelect(opt); }},[opt]));
+  });
+  container.appendChild(row);
+}
+function viewPracticeCompulsorySub(container, eventName){
   var lvl = state.level;
-  container.appendChild(el("div",{class:"psectitle"},["LEVEL "+lvl+" — PRACTICE REFERENCE"+(state.teamName?" · "+state.teamName:"")]));
-
-  // Compulsory
-  container.appendChild(practiceSection("Compulsory"));
   var cbucket = getBucket(["compulsory", lvl]);
-  Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
-    cbucket[eventName] = cbucket[eventName] || {};
-    var evBucket = cbucket[eventName];
-    var skillNames = COMPULSORY[lvl][eventName];
-    // Follow the same drag-set performance order used in Edit mode, not the
-    // fixed rulebook order — that's the whole point of a practice reference.
-    if(!Array.isArray(evBucket.order) || evBucket.order.length !== skillNames.length){
-      evBucket.order = skillNames.map(function(_,i){ return i; });
-    }
-    evBucket.order.forEach(function(origIdx){
-      var skillName = skillNames[origIdx];
-      var key = "s"+origIdx;
-      var rec = evBucket[key] || {};
-      var g1 = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
-      var g2 = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
-      var lines = [];
-      if(g1) lines.push("GROUP 1 — "+g1);
-      if(g2) lines.push("GROUP 2 — "+g2);
-      container.appendChild(practiceCard(skillName, eventName+" compulsory", lines.join("     ||     ")));
-    });
+  cbucket[eventName] = cbucket[eventName] || {};
+  var evBucket = cbucket[eventName];
+  var skillNames = COMPULSORY[lvl][eventName] || [];
+  if(!skillNames.length){
+    container.appendChild(el("div",{class:"pempty"},["No "+eventName+" compulsory skills set for Level "+lvl+"."]));
+    return;
+  }
+  // Follow the same drag-set performance order used in Edit mode, not the
+  // fixed rulebook order — that's the whole point of a practice reference.
+  if(!Array.isArray(evBucket.order) || evBucket.order.length !== skillNames.length){
+    evBucket.order = skillNames.map(function(_,i){ return i; });
+  }
+  evBucket.order.forEach(function(origIdx){
+    var skillName = skillNames[origIdx];
+    var key = "s"+origIdx;
+    var rec = evBucket[key] || {};
+    var g1 = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
+    var g2 = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
+    var lines = [];
+    if(g1) lines.push("GROUP 1 — "+g1);
+    if(g2) lines.push("GROUP 2 — "+g2);
+    container.appendChild(practiceCard(skillName, eventName+" compulsory", lines.join("     ||     ")));
   });
-
-  // Optional
-  container.appendChild(practiceSection("Optional"));
+}
+function viewPracticeOptionalSub(container, cat){
+  var lvl = state.level;
   var obucket = getBucket(["optional", lvl]);
-  (obucket.acro||[]).forEach(function(rec,i){
-    var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
-    var sub = skillDesc(rec) || [rec.entry,rec.top,rec.dismount].filter(Boolean).join(" → ") || "(not set yet)";
-    container.appendChild(practiceCard("Acro — Element "+(i+1), sub, roles));
-  });
-  (obucket.pyramid||[]).forEach(function(rec,i){
-    var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"]]);
-    container.appendChild(practiceCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", roles));
-  });
-  if(obucket.toss){
-    [["synced","Toss — Synced"],["solo","Toss — Solo"]].forEach(function(p){
+  if(cat==="Acro"){
+    var acro = obucket.acro||[];
+    if(!acro.length) container.appendChild(el("div",{class:"pempty"},["No acro optional elements set yet."]));
+    acro.forEach(function(rec,i){
+      var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
+      var sub = skillDesc(rec) || [rec.entry,rec.top,rec.dismount].filter(Boolean).join(" → ") || "(not set yet)";
+      container.appendChild(practiceCard("Element "+(i+1), sub, roles));
+    });
+  } else if(cat==="Pyramid"){
+    var pyr = obucket.pyramid||[];
+    if(!pyr.length) container.appendChild(el("div",{class:"pempty"},["No pyramid optional elements set yet."]));
+    pyr.forEach(function(rec,i){
+      var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"]]);
+      container.appendChild(practiceCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", roles));
+    });
+  } else if(cat==="Toss"){
+    if(!obucket.toss){ container.appendChild(el("div",{class:"pempty"},["No toss optional set yet."])); return; }
+    [["synced","Synced Toss"],["solo","Solo Toss"]].forEach(function(p){
       var rec = obucket.toss[p[0]];
       if(rec){
         var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
         container.appendChild(practiceCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", roles));
       }
     });
+  } else {
+    var tum = obucket.tumbling||[];
+    if(!tum.length) container.appendChild(el("div",{class:"pempty"},["No tumbling optional passes set yet."]));
+    tum.forEach(function(rec,i){
+      var names = (rec.athletes||[]).join(", ");
+      container.appendChild(practiceCard("Pass "+(i+1), skillDesc(rec) || skillLabelFor("Tumbling", rec) || "(not set yet)", names?("Athlete(s): "+names):""));
+    });
   }
-  (obucket.tumbling||[]).forEach(function(rec,i){
-    var names = (rec.athletes||[]).join(", ");
-    container.appendChild(practiceCard("Tumbling Pass "+(i+1), skillDesc(rec) || skillLabelFor("Tumbling", rec) || "(not set yet)", names?("Athlete(s): "+names):""));
-  });
-
-  // Team routine, in strict performance order
-  container.appendChild(practiceSection("Team Routine — in order"));
+}
+function viewPracticeTeam(container){
+  var lvl = state.level;
   var tbucket = getBucket(["team", lvl]);
   var segs = tbucket.segments || [];
   if(!segs.length){
@@ -1493,6 +1513,23 @@ function viewPractice(container){
     var title = (idx+1)+". "+seg.category+(seg.synced?" — SYNCED":"");
     container.appendChild(practiceCard(title, teamSkillLabel(seg) || "(skill not set yet)", groupsTxt?("Performers: "+groupsTxt):""));
   });
+}
+function viewPractice(container){
+  var lvl = state.level;
+  container.appendChild(el("div",{class:"psectitle"},["LEVEL "+lvl+" — PRACTICE REFERENCE"+(state.teamName?" · "+state.teamName:"")]));
+
+  if(state.practiceRound==="compulsory"){
+    practiceSubTabs(container, state.practiceSub, function(v){ state.practiceSub=v; save(); renderAll(); });
+    container.appendChild(practiceSection("Compulsory — "+state.practiceSub));
+    viewPracticeCompulsorySub(container, state.practiceSub);
+  } else if(state.practiceRound==="optional"){
+    practiceSubTabs(container, state.practiceSub, function(v){ state.practiceSub=v; save(); renderAll(); });
+    container.appendChild(practiceSection("Optional — "+state.practiceSub));
+    viewPracticeOptionalSub(container, state.practiceSub);
+  } else {
+    container.appendChild(practiceSection("Team Routine — in order"));
+    viewPracticeTeam(container);
+  }
 }
 
 /* ---------------- Top nav + render ---------------- */
@@ -1510,6 +1547,11 @@ function renderNav(){
   if(state.mode==="edit"){
     [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","My Export"],["judges","Judges"]].forEach(function(r){
       var t = el("button",{class:"tab"+(state.round===r[0]?" active":""), type:"button", onclick:function(){ state.round=r[0]; renderAll(); }},[r[1]]);
+      roundTabs.appendChild(t);
+    });
+  } else {
+    [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"]].forEach(function(r){
+      var t = el("button",{class:"tab"+(state.practiceRound===r[0]?" active":""), type:"button", onclick:function(){ state.practiceRound=r[0]; save(); renderAll(); }},[r[1]]);
       roundTabs.appendChild(t);
     });
   }
