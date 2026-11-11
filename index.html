@@ -326,13 +326,50 @@ function athletePicker(selected, onChange){
   return wrap;
 }
 
+/* A labeled athlete picker for one physical role (side base, flyer, mid, etc.)
+   with an explicit "N/A" toggle for roles that don't apply to a given skill/group. */
+function rolePicker(rec, key, label){
+  rec[key] = rec[key] || [];
+  rec[key+"_na"] = !!rec[key+"_na"];
+  var wrap = el("div",{class:"field"});
+  wrap.appendChild(el("label",{},[label]));
+  var slot = el("div");
+  function paint(){
+    slot.innerHTML = "";
+    if(rec[key+"_na"]){
+      slot.appendChild(el("div",{class:"athletebtn"},[ el("span",{class:"placeholder"},["N/A"]) ]));
+    } else {
+      slot.appendChild(athletePicker(rec[key], function(a){ rec[key]=a; save(); }));
+    }
+  }
+  paint();
+  var naLabel = el("label",{class:"checkline"});
+  var naCb = el("input",{type:"checkbox"}); naCb.checked = rec[key+"_na"];
+  naCb.addEventListener("change", function(){
+    rec[key+"_na"] = naCb.checked;
+    if(naCb.checked) rec[key] = [];
+    paint(); save();
+  });
+  naLabel.appendChild(naCb); naLabel.appendChild(document.createTextNode(" N/A"));
+  wrap.appendChild(slot);
+  wrap.appendChild(naLabel);
+  return wrap;
+}
+function roleExport(rec, key, label){
+  return label+":"+(rec[key+"_na"] ? "N/A" : "["+(rec[key]||[]).join(", ")+"]");
+}
+
 /* ---------------- Acro skill picker (Hand Support / Walk-Pitch-Toss / Punk) ---------------- */
 function acroSkillCard(rec, onRemove, title, onUpdate){
   rec.family = rec.family || "wpt";
-  rec.group = rec.group || "Group (3+ bases)";
-  rec.athletes = rec.athletes || [];
+  rec.entryGroup = rec.entryGroup || "Group (3+ bases)";
+  rec.topGroup = rec.topGroup || "Group (3+ bases)";
+  rec.dismountGroup = rec.dismountGroup || "Group (3+ bases)";
   var card = el("div",{class:"card"});
   var __initial = true;
+  function groupTypeField(label, key){
+    return field(label, selectEl(Object.keys(GROUP_PTS), rec[key], function(v){ rec[key]=v; render(); save(); }));
+  }
   function render(){
     card.innerHTML = "";
     card.appendChild(el("h3",{},[title||"Acro Element"]));
@@ -340,7 +377,7 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
     card.appendChild(el("div",{class:"row"},[ field("Skill family", famSel) ]));
 
     var entryMap, topMap, dismMap, pts=0, breakdown=[];
-    var gp = GROUP_PTS[rec.group];
+    var gpEntry = GROUP_PTS[rec.entryGroup], gpTop = GROUP_PTS[rec.topGroup], gpDismount = GROUP_PTS[rec.dismountGroup];
 
     if(rec.family==="hs"){ entryMap=HS_ENTRY; topMap=HS_TOP; dismMap=HS_DISMOUNT; }
     else if(rec.family==="wpt"){ entryMap=WPT_ENTRY; topMap=WPT_TOP; dismMap=null; }
@@ -350,9 +387,13 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
     rec.top = rec.top || Object.keys(topMap)[0];
 
     var row1 = el("div",{class:"row"});
-    row1.appendChild(field("Entry", selectEl(Object.keys(entryMap), rec.entry, function(v){ rec.entry=v; render(); save(); })));
-    row1.appendChild(field("Top skill / hold", selectEl(Object.keys(topMap), rec.top, function(v){ rec.top=v; render(); save(); })));
+    row1.appendChild(field("Entry / Mount", selectEl(Object.keys(entryMap), rec.entry, function(v){ rec.entry=v; render(); save(); })));
+    row1.appendChild(groupTypeField("Mount/Load-In Group Type", "entryGroup"));
     card.appendChild(row1);
+    var row1b = el("div",{class:"row"});
+    row1b.appendChild(field("Top skill / hold", selectEl(Object.keys(topMap), rec.top, function(v){ rec.top=v; render(); save(); })));
+    row1b.appendChild(groupTypeField("Top Phase Group Type", "topGroup"));
+    card.appendChild(row1b);
 
     if(rec.family==="hs"){
       rec.hsopt = rec.hsopt || "None";
@@ -361,6 +402,7 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
       var row2 = el("div",{class:"row"});
       row2.appendChild(field("Handstand option", selectEl(Object.keys(HS_OPT), rec.hsopt, function(v){ rec.hsopt=v; render(); save(); })));
       row2.appendChild(field("Dismount", selectEl(Object.keys(HS_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      row2.appendChild(groupTypeField("Dismount Group Type", "dismountGroup"));
       card.appendChild(row2);
       var extLine = el("label",{class:"checkline"});
       var extCb = el("input",{type:"checkbox"}); extCb.checked = rec.ext;
@@ -368,18 +410,19 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
       extLine.appendChild(extCb); extLine.appendChild(document.createTextNode(" Dismount from extension height (handstand skills, +1)"));
       card.appendChild(extLine);
 
-      pts += entryMap[rec.entry] + gp;
-      pts += topMap[rec.top] + gp;
+      pts += entryMap[rec.entry] + gpEntry;
+      pts += topMap[rec.top] + gpTop;
       pts += HS_OPT[rec.hsopt];
       var dpts = HS_DISMOUNT[rec.dismount] + (rec.ext?1:0);
-      pts += dpts + gp;
-      breakdown = ["Entry "+entryMap[rec.entry]+" +grp "+gp, "Top "+topMap[rec.top]+" +grp "+gp,
-        "HS option +"+HS_OPT[rec.hsopt], "Dismount "+dpts+" +grp "+gp];
+      pts += dpts + gpDismount;
+      breakdown = ["Entry "+entryMap[rec.entry]+" +grp "+gpEntry, "Top "+topMap[rec.top]+" +grp "+gpTop,
+        "HS option +"+HS_OPT[rec.hsopt], "Dismount "+dpts+" +grp "+gpDismount];
     } else if(rec.family==="wpt"){
       rec.extbonus = !!rec.extbonus;
       rec.dismount = rec.dismount || Object.keys(WPT_DISMOUNT)[0];
       var row2b = el("div",{class:"row"});
       row2b.appendChild(field("Dismount", selectEl(Object.keys(WPT_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      row2b.appendChild(groupTypeField("Dismount Group Type", "dismountGroup"));
       card.appendChild(row2b);
       if(WPT_ENTRY_EXT_BONUS[rec.entry]){
         var extLine2 = el("label",{class:"checkline"});
@@ -389,25 +432,29 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
         card.appendChild(extLine2);
       }
       var entryPts = WPT_ENTRY[rec.entry] + (rec.extbonus && WPT_ENTRY_EXT_BONUS[rec.entry] ? WPT_ENTRY_EXT_BONUS[rec.entry] : 0);
-      pts += entryPts + gp;
-      pts += WPT_TOP[rec.top] + gp;
-      pts += WPT_DISMOUNT[rec.dismount] + gp;
-      breakdown = ["Entry "+entryPts+" +grp "+gp, "Top "+WPT_TOP[rec.top]+" +grp "+gp, "Dismount "+WPT_DISMOUNT[rec.dismount]+" +grp "+gp];
+      pts += entryPts + gpEntry;
+      pts += WPT_TOP[rec.top] + gpTop;
+      pts += WPT_DISMOUNT[rec.dismount] + gpDismount;
+      breakdown = ["Entry "+entryPts+" +grp "+gpEntry, "Top "+WPT_TOP[rec.top]+" +grp "+gpTop, "Dismount "+WPT_DISMOUNT[rec.dismount]+" +grp "+gpDismount];
     } else {
       rec.dismount = rec.dismount || Object.keys(PUNK_DISMOUNT)[0];
       var row2c = el("div",{class:"row"});
       row2c.appendChild(field("Dismount", selectEl(Object.keys(PUNK_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
+      row2c.appendChild(groupTypeField("Dismount Group Type", "dismountGroup"));
       card.appendChild(row2c);
       var topIsReverse = rec.top === "Reverse Punk Popover";
-      pts += PUNK_ENTRY[rec.entry] + gp;
-      pts += PUNK_TOP[rec.top] + gp;
-      if(!topIsReverse){ pts += PUNK_DISMOUNT[rec.dismount] + gp; breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gp,"Top "+PUNK_TOP[rec.top]+" +grp "+gp,"Dismount "+PUNK_DISMOUNT[rec.dismount]+" +grp "+gp]; }
-      else breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gp,"Top (Reverse Punk Popover) "+PUNK_TOP[rec.top]+" +grp "+gp,"Dismount: use 1-1 Hand Support chart (solo +2)"];
+      pts += PUNK_ENTRY[rec.entry] + gpEntry;
+      pts += PUNK_TOP[rec.top] + gpTop;
+      if(!topIsReverse){ pts += PUNK_DISMOUNT[rec.dismount] + gpDismount; breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gpEntry,"Top "+PUNK_TOP[rec.top]+" +grp "+gpTop,"Dismount "+PUNK_DISMOUNT[rec.dismount]+" +grp "+gpDismount]; }
+      else breakdown=["Entry "+PUNK_ENTRY[rec.entry]+" +grp "+gpEntry,"Top (Reverse Punk Popover) "+PUNK_TOP[rec.top]+" +grp "+gpTop,"Dismount: use 1-1 Hand Support chart (solo +2)"];
     }
 
-    var groupSel = selectEl(Object.keys(GROUP_PTS), rec.group, function(v){ rec.group=v; render(); save(); });
-    card.appendChild(el("div",{class:"row"},[ field("Group type (applies each phase)", groupSel) ]));
-    card.appendChild(el("div",{class:"row"},[ field("Athletes", athletePicker(rec.athletes, function(a){ rec.athletes=a; })) ]));
+    var roleRow = el("div",{class:"row"});
+    roleRow.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
+    roleRow.appendChild(rolePicker(rec, "frontBase", "Front Base"));
+    roleRow.appendChild(rolePicker(rec, "backBase", "Back Base"));
+    roleRow.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
+    card.appendChild(roleRow);
 
     var cat = diffCategory(pts);
     rec._value = cat[3];
@@ -429,7 +476,6 @@ function acroSkillCard(rec, onRemove, title, onUpdate){
 function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
   rec.letter = rec.letter || "A";
   rec.skill = rec.skill || PYRAMID_SKILLS["A"][0];
-  rec.base = rec.base||[]; rec.mid = rec.mid||[]; rec.flyer = rec.flyer||[];
   var card = el("div",{class:"card"});
   var __initial = true;
   function render(){
@@ -444,9 +490,9 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
     r.appendChild(field("Specific skill", skillSel));
     card.appendChild(r);
     var r2 = el("div",{class:"row"});
-    r2.appendChild(field("Base(s)", athletePicker(rec.base, function(a){ rec.base=a; })));
-    r2.appendChild(field("Mid", athletePicker(rec.mid, function(a){ rec.mid=a; })));
-    r2.appendChild(field("Flyer(s)", athletePicker(rec.flyer, function(a){ rec.flyer=a; })));
+    r2.appendChild(rolePicker(rec, "bottomBase", "Bottom Base(s)"));
+    r2.appendChild(rolePicker(rec, "mid", "Mid(s)"));
+    r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
     card.appendChild(r2);
     var v = PYRAMID_VALUES[level][rec.letter]||0;
     rec._value = v;
@@ -462,7 +508,6 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate){
 function tossSkillCard(rec, level, onRemove, title, onUpdate){
   var options = TOSS_VALUES[level];
   rec.skill = rec.skill || Object.keys(options)[0];
-  rec.base = rec.base||[]; rec.flyer = rec.flyer||[];
   var card = el("div",{class:"card"});
   var __initial = true;
   function render(){
@@ -471,8 +516,10 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate){
     var sel = selectEl(Object.keys(options).map(function(k){ return [k, k+"  ("+options[k].toFixed(1)+")"]; }), rec.skill, function(v){ rec.skill=v; render(); save(); });
     card.appendChild(el("div",{class:"row"},[ field("Toss skill", sel) ]));
     var r2 = el("div",{class:"row"});
-    r2.appendChild(field("Base(s)", athletePicker(rec.base, function(a){ rec.base=a; })));
-    r2.appendChild(field("Flyer(s)", athletePicker(rec.flyer, function(a){ rec.flyer=a; })));
+    r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
+    r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
+    r2.appendChild(rolePicker(rec, "backBase", "Back Base"));
+    r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
     card.appendChild(r2);
     var v = options[rec.skill];
     rec._value = v;
@@ -536,6 +583,17 @@ function tumblePassCard(rec, level, onRemove, title, onUpdate){
 }
 
 /* ---------------- Views ---------------- */
+function groupRoleBlock(rec, prefix, label){
+  var block = el("div",{});
+  block.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:12px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},[label]));
+  var row = el("div",{class:"row"});
+  row.appendChild(rolePicker(rec, prefix+"SideBase", "Side Base(s)"));
+  row.appendChild(rolePicker(rec, prefix+"FrontBase", "Front Base"));
+  row.appendChild(rolePicker(rec, prefix+"BackBase", "Back Base"));
+  row.appendChild(rolePicker(rec, prefix+"Flyer", "Flyer(s)"));
+  block.appendChild(row);
+  return block;
+}
 function viewCompulsory(container){
   var lvl = state.level;
   var bucket = getBucket(["compulsory", lvl]);
@@ -544,14 +602,12 @@ function viewCompulsory(container){
     bucket[eventName] = bucket[eventName] || {};
     COMPULSORY[lvl][eventName].forEach(function(skillName, idx){
       var key = "s"+idx;
-      bucket[eventName][key] = bucket[eventName][key] || {g1:[], g2:[]};
+      bucket[eventName][key] = bucket[eventName][key] || {};
       var rec = bucket[eventName][key];
       var card = el("div",{class:"card"});
       card.appendChild(el("h3",{},[skillName]));
-      var r = el("div",{class:"row"});
-      r.appendChild(field("Group 1", athletePicker(rec.g1, function(a){ rec.g1=a; })));
-      r.appendChild(field("Group 2", athletePicker(rec.g2, function(a){ rec.g2=a; })));
-      card.appendChild(r);
+      card.appendChild(groupRoleBlock(rec, "g1", "Group 1"));
+      card.appendChild(groupRoleBlock(rec, "g2", "Group 2"));
       container.appendChild(card);
     });
   });
@@ -690,7 +746,10 @@ function buildExportText(){
       COMPULSORY[lvl][ev].forEach(function(name, idx){
         var rec = c[ev] && c[ev]["s"+idx];
         lines.push("  "+name);
-        if(rec) lines.push("    Group 1: "+(rec.g1.join(", ")||"—")+"   Group 2: "+(rec.g2.join(", ")||"—"));
+        if(rec){
+          lines.push("    Group 1 — "+roleExport(rec,"g1SideBase","Side Base")+" "+roleExport(rec,"g1FrontBase","Front Base")+" "+roleExport(rec,"g1BackBase","Back Base")+" "+roleExport(rec,"g1Flyer","Flyer"));
+          lines.push("    Group 2 — "+roleExport(rec,"g2SideBase","Side Base")+" "+roleExport(rec,"g2FrontBase","Front Base")+" "+roleExport(rec,"g2BackBase","Back Base")+" "+roleExport(rec,"g2Flyer","Flyer"));
+        }
       });
     });
   }
@@ -700,18 +759,18 @@ function buildExportText(){
     if(o.acro){
       var at = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ at += r._value||0; });
       lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" → total "+at.toFixed(2));
-      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:"")+" → +"+(r._value||0).toFixed(1)+"   ["+ (r.athletes||[]).join(", ") +"]"); });
+      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:"")+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.pyramid){
       var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
       lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" → total "+pt.toFixed(2));
-      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+r.skill+" (letter "+r.letter+") → +"+(r._value||0).toFixed(1)+"   base:["+(r.base||[]).join(", ")+"] mid:["+(r.mid||[]).join(", ")+"] flyer:["+(r.flyer||[]).join(", ")+"]"); });
+      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+r.skill+" (letter "+r.letter+") → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"bottomBase","Bottom Base")+" "+roleExport(r,"mid","Mid")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.toss){
       var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
       lines.push("\nToss — total "+tt.toFixed(2));
-      lines.push("  Synced: "+o.toss.synced.skill+" ("+(o.toss.synced._value||0).toFixed(1)+")   ["+(o.toss.synced.base||[]).concat(o.toss.synced.flyer||[]).join(", ")+"]");
-      lines.push("  Solo: "+o.toss.solo.skill+" ("+(o.toss.solo._value||0).toFixed(1)+")   ["+(o.toss.solo.base||[]).concat(o.toss.solo.flyer||[]).join(", ")+"]");
+      lines.push("  Synced: "+o.toss.synced.skill+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
+      lines.push("  Solo: "+o.toss.solo.skill+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
     }
     if(o.tumbling){
       var sum=0; o.tumbling.forEach(function(r){ sum+= r._value||0; });
