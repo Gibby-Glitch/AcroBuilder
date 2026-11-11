@@ -636,6 +636,26 @@ function rolePicker(rec, key, label){
 function roleExport(rec, key, label){
   return label+":"+(rec[key+"_na"] ? "N/A" : "["+(rec[key]||[]).join(", ")+"]");
 }
+/* Same as roleExport, but returns null for a role nobody touched (no names,
+   no explicit N/A) so export text doesn't pad every pyramid with unused
+   "Front Base:[]" / "Catcher:[]" clutter for the roles it doesn't use. */
+function roleExportIfUsed(rec, key, label){
+  var used = (rec[key] && rec[key].length) || rec[key+"_na"];
+  return used ? roleExport(rec, key, label) : null;
+}
+/* Full pyramid role line for export text: the three core roles always show,
+   the four "loaded in from outside the stack" roles only show if someone
+   actually assigned (or explicitly N/A'd) them. */
+function pyramidRoleExportLine(rec, prefix){
+  prefix = prefix || "";
+  function k(suffix){ return prefix ? (prefix+suffix) : (suffix.charAt(0).toLowerCase()+suffix.slice(1)); }
+  var parts = [roleExport(rec,k("BottomBase"),"Bottom Base"), roleExport(rec,k("Mid"),"Mid"), roleExport(rec,k("Flyer"),"Flyer")];
+  [["FrontBase","Front Base"],["BackBase","Back Base"],["SideBase","Side Base"],["Catcher","Catcher"]].forEach(function(p){
+    var v = roleExportIfUsed(rec, k(p[0]), p[1]);
+    if(v) parts.push(v);
+  });
+  return parts.join(" ");
+}
 
 /* Lets a coach enter a skill/value that isn't in the chart yet, bypassing the
    normal lookup entirely. Returns the toggle+fields block; call render() again
@@ -823,9 +843,7 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
     }
     if(!hideRoles){
       var r2 = el("div",{class:"row"});
-      r2.appendChild(rolePicker(rec, "bottomBase", "Bottom Base(s)"));
-      r2.appendChild(rolePicker(rec, "mid", "Mid(s)"));
-      r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
+      pyramidRoleFields(rec).forEach(function(f){ r2.appendChild(f); });
       card.appendChild(r2);
     }
     rec._value = v;
@@ -945,27 +963,44 @@ function groupRoleBlock(rec, prefix, label){
   block.appendChild(row);
   return block;
 }
-/* Pyramid groups use Bottom Base(s)/Mid(s)/Flyer(s) — not the Acro/Toss
-   Side-Front-Back-Flyer set. There's no sync/group-type concept for pyramids
-   in Compulsory or Optional (that only exists if a team chooses a synced
-   pyramid moment in Team Routine, via that tab's own Synchronized checkbox). */
+/* Pyramid roles: Bottom Base(s)/Mid(s)/Flyer(s) always apply. Some pyramids
+   also have bases load the flyer in from outside the stack — Front Base,
+   Back Base, Side Base(s), and Catcher(s) cover that, each N/A-able via
+   rolePicker when a given pyramid doesn't use them. There's no sync/
+   group-type concept for pyramids in Compulsory or Optional (that only
+   exists if a team chooses a synced pyramid moment in Team Routine, via
+   that tab's own Synchronized checkbox).
+   prefix "" matches the no-prefix key convention used by pyramidSkillCard
+   and instanceRoleFields (e.g. "bottomBase"); a prefix like "g1" matches
+   the Compulsory group convention (e.g. "g1BottomBase"). */
+function pyramidRoleFields(rec, prefix){
+  prefix = prefix || "";
+  function k(suffix){ return prefix ? (prefix+suffix) : (suffix.charAt(0).toLowerCase()+suffix.slice(1)); }
+  return [
+    rolePicker(rec, k("BottomBase"), "Bottom Base(s)"),
+    rolePicker(rec, k("Mid"), "Mid(s)"),
+    rolePicker(rec, k("Flyer"), "Flyer(s)"),
+    rolePicker(rec, k("FrontBase"), "Front Base"),
+    rolePicker(rec, k("BackBase"), "Back Base(s)"),
+    rolePicker(rec, k("SideBase"), "Side Base(s)"),
+    rolePicker(rec, k("Catcher"), "Catcher(s)")
+  ];
+}
 function pyramidGroupRoleBlock(rec, prefix, label){
   var block = el("div",{});
   block.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:12px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},[label]));
   var row = el("div",{class:"row"});
-  row.appendChild(rolePicker(rec, prefix+"BottomBase", "Bottom Base(s)"));
-  row.appendChild(rolePicker(rec, prefix+"Mid", "Mid(s)"));
-  row.appendChild(rolePicker(rec, prefix+"Flyer", "Flyer(s)"));
+  pyramidRoleFields(rec, prefix).forEach(function(f){ row.appendChild(f); });
   block.appendChild(row);
   return block;
 }
 /* Compulsory tumbling has no bases/mids/flyers at all — just a required
    number of tumblers performing the pass, where the required count is the
    team's roster size for this level, divided by 2 and rounded down
-   (e.g. 11 athletes → 5 tumblers). */
+   (e.g. 11 athletes → 5 tumblers), capped at a max of 6 (12+ athletes → 6). */
 function requiredTumblers(lvl){
   var size = (state.teamSize && state.teamSize[lvl]) || ATHLETES.length;
-  return Math.floor(size/2);
+  return Math.min(6, Math.floor(size/2));
 }
 function tumblerGroupBlock(rec, label, required){
   rec.tumblers = rec.tumblers || [];
@@ -1012,7 +1047,7 @@ function viewCompulsory(container){
         })()
       ));
       container.appendChild(sizeRow);
-      container.appendChild(el("div",{class:"hint"},["Required tumblers per pass = floor(team size ÷ 2) = "+requiredTumblers(lvl)+". Example: 11 → 5.5 → 5."]));
+      container.appendChild(el("div",{class:"hint"},["Required tumblers per pass = floor(team size ÷ 2), capped at 6 = "+requiredTumblers(lvl)+". Example: 11 → 5.5 → 5. 12+ athletes always caps at 6."]));
     }
 
     // "order" holds display/performance order as a permutation of the fixed
@@ -1136,7 +1171,7 @@ function viewOptional(container){
 
 function instanceNames(inst){
   var out=[];
-  ["sideBase","frontBase","backBase","flyer","bottomBase","mid","athletes"].forEach(function(k){
+  ["sideBase","frontBase","backBase","flyer","bottomBase","mid","catcher","athletes"].forEach(function(k){
     if(inst[k] && inst[k].length) out = out.concat(inst[k]);
   });
   return out;
@@ -1166,9 +1201,7 @@ function teamSkillLabel(seg){ return skillLabelFor(seg.category, seg.skill||{});
 function instanceRoleFields(category, inst){
   var fields = [];
   if(category==="Pyramid"){
-    fields.push(rolePicker(inst, "bottomBase", "Bottom Base(s)"));
-    fields.push(rolePicker(inst, "mid", "Mid(s)"));
-    fields.push(rolePicker(inst, "flyer", "Flyer(s)"));
+    fields = fields.concat(pyramidRoleFields(inst));
   } else if(category==="Standing Tumbling" || category==="Running Tumbling"){
     fields.push(rolePicker(inst, "athletes", "Athlete(s)"));
   } else {
@@ -1317,8 +1350,8 @@ function buildExportText(){
         lines.push("  "+name);
         if(rec){
           if(ev==="Pyramid"){
-            lines.push("    Pyramid 1 — "+roleExport(rec,"g1BottomBase","Bottom Base")+" "+roleExport(rec,"g1Mid","Mid")+" "+roleExport(rec,"g1Flyer","Flyer"));
-            lines.push("    Pyramid 2 — "+roleExport(rec,"g2BottomBase","Bottom Base")+" "+roleExport(rec,"g2Mid","Mid")+" "+roleExport(rec,"g2Flyer","Flyer"));
+            lines.push("    Pyramid 1 — "+pyramidRoleExportLine(rec,"g1"));
+            lines.push("    Pyramid 2 — "+pyramidRoleExportLine(rec,"g2"));
           } else if(ev==="Tumbling"){
             var req = requiredTumblers(lvl);
             lines.push("    Tumblers — ["+(rec.tumblers||[]).join(", ")+"] ("+(rec.tumblers||[]).length+"/"+req+")");
@@ -1341,7 +1374,7 @@ function buildExportText(){
     if(o.pyramid){
       var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
       lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" → total "+pt.toFixed(2));
-      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+(skillDesc(r) || r.skill+" (letter "+r.letter+")")+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"bottomBase","Bottom Base")+" "+roleExport(r,"mid","Mid")+" "+roleExport(r,"flyer","Flyer")); });
+      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+(skillDesc(r) || r.skill+" (letter "+r.letter+")")+" → +"+(r._value||0).toFixed(1)+"   "+pyramidRoleExportLine(r)); });
     }
     if(o.toss){
       var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
@@ -1559,8 +1592,10 @@ function viewPracticeCompulsorySub(container, eventName){
     var rec = evBucket[key] || {};
     var lines = [];
     if(eventName==="Pyramid"){
-      var g1 = practiceRoleLine(rec, [["g1BottomBase","Bottom"],["g1Mid","Mid"],["g1Flyer","Flyer"]]);
-      var g2 = practiceRoleLine(rec, [["g2BottomBase","Bottom"],["g2Mid","Mid"],["g2Flyer","Flyer"]]);
+      var pyrPairs1 = [["g1BottomBase","Bottom"],["g1Mid","Mid"],["g1Flyer","Flyer"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1SideBase","Side"],["g1Catcher","Catcher"]];
+      var pyrPairs2 = [["g2BottomBase","Bottom"],["g2Mid","Mid"],["g2Flyer","Flyer"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2SideBase","Side"],["g2Catcher","Catcher"]];
+      var g1 = practiceRoleLine(rec, pyrPairs1);
+      var g2 = practiceRoleLine(rec, pyrPairs2);
       if(g1) lines.push("PYRAMID 1 — "+g1);
       if(g2) lines.push("PYRAMID 2 — "+g2);
     } else if(eventName==="Tumbling"){
@@ -1590,7 +1625,7 @@ function viewPracticeOptionalSub(container, cat){
     var pyr = obucket.pyramid||[];
     if(!pyr.length) container.appendChild(el("div",{class:"pempty"},["No pyramid optional elements set yet."]));
     pyr.forEach(function(rec,i){
-      var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"]]);
+      var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"],["frontBase","Front"],["backBase","Back"],["sideBase","Side"],["catcher","Catcher"]]);
       container.appendChild(practiceCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", roles));
     });
   } else if(cat==="Toss"){
