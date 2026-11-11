@@ -1435,9 +1435,17 @@ function viewPractice(container){
   var cbucket = getBucket(["compulsory", lvl]);
   Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
     cbucket[eventName] = cbucket[eventName] || {};
-    COMPULSORY[lvl][eventName].forEach(function(skillName, idx){
-      var key = "s"+idx;
-      var rec = cbucket[eventName][key] || {};
+    var evBucket = cbucket[eventName];
+    var skillNames = COMPULSORY[lvl][eventName];
+    // Follow the same drag-set performance order used in Edit mode, not the
+    // fixed rulebook order — that's the whole point of a practice reference.
+    if(!Array.isArray(evBucket.order) || evBucket.order.length !== skillNames.length){
+      evBucket.order = skillNames.map(function(_,i){ return i; });
+    }
+    evBucket.order.forEach(function(origIdx){
+      var skillName = skillNames[origIdx];
+      var key = "s"+origIdx;
+      var rec = evBucket[key] || {};
       var g1 = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
       var g2 = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
       var lines = [];
