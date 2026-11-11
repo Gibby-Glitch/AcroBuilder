@@ -46,7 +46,7 @@ button{font-family:inherit; cursor:pointer;}
   border-bottom:1px solid var(--border);
 }
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg);}
-.brand{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+.brand{display:flex; align-items:baseline; gap:8px; margin-bottom:10px;}
 .brand h1{font-size:19px;}
 .brand span{color:var(--fg-dim); font-size:12px;}
 .tabrow{display:flex; gap:6px; flex-wrap:wrap;}
@@ -68,9 +68,17 @@ main{max-width:760px; margin:0 auto; padding-bottom:60px;}
 
 .card{
   background:var(--surface); border:1px solid var(--border); border-radius:12px;
-  padding:14px; margin-bottom:12px;
+  padding:14px; margin-bottom:12px; position:relative;
 }
 .card h3{font-size:14.5px; margin-bottom:2px;}
+.draghandle{
+  display:flex; align-items:center; gap:6px; margin:-4px -4px 8px; padding:6px 8px;
+  border-radius:8px; background:var(--surface-2); color:var(--fg-dim); font-size:11.5px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.04em; cursor:grab; touch-action:none; user-select:none;
+}
+.draghandle::before{content:"⠿⠿"; font-size:14px; letter-spacing:1px; color:var(--accent);}
+.card.dragging{opacity:.5; box-shadow:0 8px 18px rgba(0,0,0,.18); z-index:5;}
+.card.dragover{outline:3px solid var(--accent); outline-offset:2px;}
 .card .meta{color:var(--fg-dim); font-size:12px; margin-bottom:10px;}
 .row{display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;}
 .field{display:flex; flex-direction:column; gap:4px; min-width:0; flex:1 1 150px;}
@@ -490,6 +498,62 @@ function el(tag, attrs, kids){
   (kids||[]).forEach(function(k){ if(typeof k==="string") e.appendChild(document.createTextNode(k)); else if(k) e.appendChild(k); });
   return e;
 }
+
+/* Small "⠿⠿ drag to reorder" grip, prepended to a card. Dragging only arms
+   while the pointer is down on the grip itself, so selects/inputs/buttons
+   elsewhere on the card keep working normally. */
+function addDragHandle(card){
+  var handle = el("div",{class:"draghandle"},["Drag to reorder"]);
+  card.insertBefore(handle, card.firstChild);
+  return handle;
+}
+
+/* Pointer-based drag reorder (works with mouse, touch and pen — unlike the
+   native HTML5 Drag and Drop API, which iPad Safari doesn't support).
+   wrap: the element directly containing the draggable cards.
+   selector: class selector for the cards (must include addDragHandle()'s card).
+   onReorder(fromIndex, toIndex): called once when a drag ends somewhere new;
+   caller is responsible for reordering its own data array and saving/redrawing. */
+function enableDragReorder(wrap, selector, onReorder){
+  var dragEl = null, items = [];
+  function clearHighlights(){ items.forEach(function(it){ it.classList.remove("dragover"); }); }
+  function onMove(e){
+    if(!dragEl) return;
+    var y = e.touches ? e.touches[0].clientY : e.clientY;
+    dragEl.style.transform = "translateY("+(y - dragEl._startY)+"px)";
+    clearHighlights();
+    items.forEach(function(it){
+      if(it===dragEl) return;
+      var r = it.getBoundingClientRect();
+      if(y > r.top && y < r.bottom) it.classList.add("dragover");
+    });
+  }
+  function onUp(){
+    if(!dragEl) return;
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+    var overEl = wrap.querySelector(selector+".dragover");
+    dragEl.style.transform = ""; dragEl.classList.remove("dragging");
+    clearHighlights();
+    var from = items.indexOf(dragEl), to = overEl ? items.indexOf(overEl) : -1;
+    dragEl = null;
+    if(to>=0 && to!==from) onReorder(from, to);
+  }
+  wrap.querySelectorAll(selector).forEach(function(card){
+    var handle = card.querySelector(".draghandle");
+    if(!handle) return;
+    handle.addEventListener("pointerdown", function(e){
+      items = Array.prototype.slice.call(wrap.querySelectorAll(selector));
+      dragEl = card;
+      card._startY = e.clientY;
+      card.classList.add("dragging");
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onUp);
+    });
+  });
+}
 function diffCategory(pts){
   for(var i=0;i<DIFF_CAT.length;i++){ if(pts>=DIFF_CAT[i][0] && pts<=DIFF_CAT[i][1]) return DIFF_CAT[i]; }
   return [0,0,"—",0];
@@ -876,21 +940,39 @@ function groupRoleBlock(rec, prefix, label){
   block.appendChild(row);
   return block;
 }
+function refreshCompulsory(){ var app=document.getElementById("app"); app.innerHTML=""; viewCompulsory(app); }
 function viewCompulsory(container){
   var lvl = state.level;
   var bucket = getBucket(["compulsory", lvl]);
   Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
     container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},[eventName+" Compulsory"]), el("span",{class:"req"},["Start Value 10.0"]) ]));
     bucket[eventName] = bucket[eventName] || {};
-    COMPULSORY[lvl][eventName].forEach(function(skillName, idx){
-      var key = "s"+idx;
-      bucket[eventName][key] = bucket[eventName][key] || {};
-      var rec = bucket[eventName][key];
+    var evBucket = bucket[eventName];
+    var skillNames = COMPULSORY[lvl][eventName];
+    // "order" holds display/performance order as a permutation of the fixed
+    // skill-name indices, so dragging a card never changes which required
+    // skill its roles belong to — only the order the cards (and athletes) show in.
+    if(!Array.isArray(evBucket.order) || evBucket.order.length !== skillNames.length){
+      evBucket.order = skillNames.map(function(_,i){ return i; });
+    }
+    var eventWrap = el("div",{});
+    evBucket.order.forEach(function(origIdx){
+      var skillName = skillNames[origIdx];
+      var key = "s"+origIdx;
+      evBucket[key] = evBucket[key] || {};
+      var rec = evBucket[key];
       var card = el("div",{class:"card"});
+      addDragHandle(card);
       card.appendChild(el("h3",{},[skillName]));
       card.appendChild(groupRoleBlock(rec, "g1", "Group 1"));
       card.appendChild(groupRoleBlock(rec, "g2", "Group 2"));
-      container.appendChild(card);
+      eventWrap.appendChild(card);
+    });
+    container.appendChild(eventWrap);
+    enableDragReorder(eventWrap, ".card", function(from, to){
+      var moved = evBucket.order.splice(from,1)[0];
+      evBucket.order.splice(to,0,moved);
+      save(); refreshCompulsory();
     });
   });
   container.appendChild(el("div",{class:"totalbar"},[
@@ -908,10 +990,18 @@ function viewOptional(container){
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Acro — Optional"]), el("span",{class:"req"},[OPT_ELEMENTS[lvl]+" solo elements · base "+OPT_BASE[lvl].Acro.toFixed(1)]) ]));
   bucket.acro = bucket.acro || [];
   while(bucket.acro.length < OPT_ELEMENTS[lvl]) bucket.acro.push({});
+  var acroWrap = el("div",{});
   var acroTotal = OPT_BASE[lvl].Acro;
   bucket.acro.slice(0, OPT_ELEMENTS[lvl]).forEach(function(rec, i){
-    container.appendChild(acroSkillCard(rec, null, "Element "+(i+1), refreshOptional));
+    var c = acroSkillCard(rec, null, "Element "+(i+1), refreshOptional);
+    addDragHandle(c);
+    acroWrap.appendChild(c);
     acroTotal += rec._value||0;
+  });
+  container.appendChild(acroWrap);
+  enableDragReorder(acroWrap, ".card", function(from,to){
+    var moved = bucket.acro.splice(from,1)[0]; bucket.acro.splice(to,0,moved);
+    save(); refreshOptional();
   });
   container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Acro optional score"]), el("span",{class:"big"},[acroTotal.toFixed(2)]) ]));
 
@@ -919,14 +1009,22 @@ function viewOptional(container){
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Pyramid — Optional"]), el("span",{class:"req"},["2 pyramids · base "+OPT_BASE[lvl].Pyramid.toFixed(1)]) ]));
   bucket.pyramid = bucket.pyramid || [];
   while(bucket.pyramid.length < 2) bucket.pyramid.push({});
+  var pyrWrap = el("div",{});
   var pyrTotal = OPT_BASE[lvl].Pyramid;
   bucket.pyramid.slice(0,2).forEach(function(rec,i){
-    container.appendChild(pyramidSkillCard(rec, lvl, null, "Pyramid "+(i+1), refreshOptional));
+    var c = pyramidSkillCard(rec, lvl, null, "Pyramid "+(i+1), refreshOptional);
+    addDragHandle(c);
+    pyrWrap.appendChild(c);
     pyrTotal += rec._value||0;
+  });
+  container.appendChild(pyrWrap);
+  enableDragReorder(pyrWrap, ".card", function(from,to){
+    var moved = bucket.pyramid.splice(from,1)[0]; bucket.pyramid.splice(to,0,moved);
+    save(); refreshOptional();
   });
   container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Pyramid optional score"]), el("span",{class:"big"},[pyrTotal.toFixed(2)]) ]));
 
-  // Toss
+  // Toss — exactly one synced + one solo slot (the two required categories, not reorderable)
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced + 1 solo · whole-skill, no base SV"]) ]));
   bucket.toss = bucket.toss || {};
   bucket.toss.synced = bucket.toss.synced || {};
@@ -944,10 +1042,18 @@ function viewOptional(container){
   for(var s=1;s<=req.solo;s++) labels.push("Solo Pass "+s);
   labels.push("Duo Pass","Trio Pass","Quad Pass");
   while(bucket.tumbling.length < labels.length) bucket.tumbling.push({});
+  var tumbleWrap = el("div",{});
   var sum=0, n=0;
   bucket.tumbling.slice(0,labels.length).forEach(function(rec,i){
-    container.appendChild(tumblePassCard(rec, lvl, null, labels[i], refreshOptional));
+    var c = tumblePassCard(rec, lvl, null, labels[i], refreshOptional);
+    addDragHandle(c);
+    tumbleWrap.appendChild(c);
     sum += rec._value||0; n++;
+  });
+  container.appendChild(tumbleWrap);
+  enableDragReorder(tumbleWrap, ".card", function(from,to){
+    var moved = bucket.tumbling.splice(from,1)[0]; bucket.tumbling.splice(to,0,moved);
+    save(); refreshOptional();
   });
   var avg = n? sum/n : 0;
   container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Tumbling optional — average of "+n+" passes"]), el("span",{class:"big"},[avg.toFixed(2)]) ]));
@@ -1029,13 +1135,15 @@ function viewTeam(container){
   container.appendChild(grid);
 
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Segments — in performance order"]) ]));
+  var segWrap = el("div",{});
   bucket.segments.forEach(function(seg, idx){
     seg.category = seg.category || "Acro";
     seg.synced = !!seg.synced;
     seg.skill = seg.skill || {};
     seg.instances = (seg.instances && seg.instances.length) ? seg.instances : [{}];
 
-    var card = el("div",{class:"card"});
+    var card = el("div",{class:"card segmentcard"});
+    addDragHandle(card);
     var header = el("div",{class:"row"});
     header.appendChild(field("Segment "+(idx+1)+" — Category", selectEl(Object.keys(TEAM_REQ[lvl]), seg.category, function(v){ seg.category=v; seg.skill={}; seg.instances=[{}]; save(); renderTeam(); })));
     var syncLabel = el("label",{class:"checkline"});
@@ -1083,7 +1191,12 @@ function viewTeam(container){
     moveRow.appendChild(el("button",{class:"removebtn", type:"button", onclick:function(){ bucket.segments.splice(idx,1); save(); renderTeam(); }},["Remove segment"]));
     card.appendChild(moveRow);
 
-    container.appendChild(card);
+    segWrap.appendChild(card);
+  });
+  container.appendChild(segWrap);
+  enableDragReorder(segWrap, ".segmentcard", function(from,to){
+    var moved = bucket.segments.splice(from,1)[0]; bucket.segments.splice(to,0,moved);
+    save(); renderTeam();
   });
 
   var addBtn = el("button",{class:"ghostbtn", type:"button", onclick:function(){
