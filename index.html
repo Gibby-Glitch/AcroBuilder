@@ -9,22 +9,22 @@
 /* Layout: sticky top nav (level/round tabs) over a single scrolling column of cards;
    each card is a self-contained "skill picker" widget reused across Optional/Team. */
 :root{
-  --bg:#f7f5f1; --surface:#ffffff; --surface-2:#f0ede6; --border:#e2ddd3;
-  --fg:#241f1a; --fg-dim:#6b6256; --accent:#8a4a3d; --accent-fg:#ffffff;
-  --good:#3f7a52; --warn:#b8862f; --bad:#b1473f;
+  --bg:#f6f8f6; --surface:#ffffff; --surface-2:#eaf0ea; --border:#d2ddd3;
+  --fg:#141a16; --fg-dim:#516053; --accent:#1e5631; --accent-fg:#ffffff;
+  --good:#2f9e52; --warn:#b8862f; --bad:#b1473f;
   --font-display:'Space Grotesk',system-ui,sans-serif; --font-body:'Inter',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
   padding-top: env(safe-area-inset-top,0px); padding-bottom: env(safe-area-inset-bottom,0px);
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#1b1815; --surface:#242019; --surface-2:#2c271f; --border:#3a342a;
-    --fg:#f3efe8; --fg-dim:#aba195; --accent:#e0a28e; --accent-fg:#241008;
+    --bg:#0e1511; --surface:#162019; --surface-2:#1c2821; --border:#30402f;
+    --fg:#f2f5f0; --fg-dim:#a9b7a9; --accent:#5fcf8b; --accent-fg:#0e1511;
     --good:#7ac491; --warn:#e2b25c; --bad:#e28b82; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#1b1815; --surface:#242019; --surface-2:#2c271f; --border:#3a342a;
-  --fg:#f3efe8; --fg-dim:#aba195; --accent:#e0a28e; --accent-fg:#241008;
+  --bg:#0e1511; --surface:#162019; --surface-2:#1c2821; --border:#30402f;
+  --fg:#f2f5f0; --fg-dim:#a9b7a9; --accent:#5fcf8b; --accent-fg:#0e1511;
   --good:#7ac491; --warn:#e2b25c; --bad:#e28b82; color-scheme:dark;
 }
 *{box-sizing:border-box;}
@@ -169,6 +169,34 @@ table.judgetable td.jlabelcol{ width:44%; }
   table.judgetable td.jblack{ background:#161616 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
 
+/* ---------- Practice / Edit mode switch ---------- */
+.modeswitch{ display:flex; gap:0; border:2px solid var(--accent); border-radius:999px; overflow:hidden; margin-left:auto; }
+.modebtn{
+  background:var(--surface); color:var(--accent); border:none; padding:7px 16px; font-size:13px; font-weight:700;
+  font-family:var(--font-display); letter-spacing:.02em;
+}
+.modebtn.active{ background:var(--accent); color:var(--accent-fg); }
+
+/* ---------- Practice view: big, high-contrast, glance-from-across-the-gym ---------- */
+.psectitle{
+  font-family:var(--font-display); font-size:15px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--accent-fg); background:var(--accent); border-radius:10px; padding:10px 16px; margin:18px 0 12px;
+}
+.psection{
+  font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--accent);
+  margin:28px 0 10px; padding-bottom:6px; border-bottom:3px solid var(--accent);
+}
+.psection:first-of-type{ margin-top:4px; }
+.pcard{
+  background:var(--surface); border:1px solid var(--border); border-left:6px solid var(--accent);
+  border-radius:10px; padding:14px 16px; margin-bottom:10px;
+}
+.ptitle{ font-family:var(--font-display); font-weight:700; font-size:21px; color:var(--fg); text-wrap:balance; }
+.psub{ font-size:15px; color:var(--fg-dim); margin-top:3px; }
+.prole{ font-size:19px; font-weight:700; color:var(--accent); margin-top:8px; line-height:1.4; }
+.prole.empty{ color:var(--fg-dim); font-weight:600; font-style:italic; font-size:15px; }
+.pempty{ color:var(--fg-dim); font-size:15px; padding:6px 2px 2px; }
+
 [hidden]{display:none !important;}
 
 .syncbadge{
@@ -202,7 +230,7 @@ table.judgetable td.jlabelcol{ width:44%; }
 </head>
 <body>
 <div class="topbar">
-  <div class="brand"><h1>Ducks 2026-2027 Season</h1><span>Acro Score Builder — Level 3/4</span><span id="syncBadge" class="syncbadge">Local only</span></div>
+  <div class="brand"><h1>Ducks 2026-2027 Season</h1><span>Acro Score Builder — Level 3/4</span><span id="syncBadge" class="syncbadge">Local only</span><div class="modeswitch" id="modeSwitch"></div></div>
   <div class="tabrow" id="roundTabs"></div>
   <div class="subrow" id="levelPills"></div>
 </div>
@@ -433,15 +461,15 @@ var RUN_DISMOUNT = {"Back Handspring Rebound":0.1,"Front Handspring Rebound":0.2
   "Front Full":1.2,"Back 1.5 Twist":1.3,"Front 1.5 Twist":1.4};
 
 /* ---------------- State ---------------- */
-var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:""};
+var state = {round:"compulsory", level:3, uid:1, data:{}, teamName:"", mode:"edit"};
 function load(){
   try{
     var raw = localStorage.getItem("acroScoreBuilder_v1");
-    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; }
+    if(raw){ var saved = JSON.parse(raw); state.data = saved.data||{}; state.uid = saved.uid||1; state.teamName = saved.teamName||""; state.mode = saved.mode||"edit"; }
   }catch(e){}
 }
 function save(){
-  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName})); }catch(e){}
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode})); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -1264,14 +1292,106 @@ function viewJudges(container){
   container.appendChild(wrap);
 }
 
+/* ---------------- Practice view: big-font, glance-and-go reference ---------------- */
+function practiceRoleLine(rec, pairs){
+  rec = rec || {};
+  var parts = pairs.map(function(p){
+    var key = p[0], label = p[1];
+    if(rec[key+"_na"]) return null;
+    var names = rec[key]||[];
+    if(!names.length) return null;
+    return label+": "+names.join(", ");
+  }).filter(Boolean);
+  return parts.join("   •   ");
+}
+function practiceCard(title, sub, roleLine){
+  var card = el("div",{class:"pcard"});
+  card.appendChild(el("div",{class:"ptitle"},[title]));
+  if(sub) card.appendChild(el("div",{class:"psub"},[sub]));
+  if(roleLine) card.appendChild(el("div",{class:"prole"},[roleLine]));
+  else card.appendChild(el("div",{class:"prole empty"},["No athletes assigned yet — set this in Edit mode"]));
+  return card;
+}
+function practiceSection(label){ return el("div",{class:"psection"},[label]); }
+function viewPractice(container){
+  var lvl = state.level;
+  container.appendChild(el("div",{class:"psectitle"},["LEVEL "+lvl+" — PRACTICE REFERENCE"+(state.teamName?" · "+state.teamName:"")]));
+
+  // Compulsory
+  container.appendChild(practiceSection("Compulsory"));
+  var cbucket = getBucket(["compulsory", lvl]);
+  Object.keys(COMPULSORY[lvl]).forEach(function(eventName){
+    cbucket[eventName] = cbucket[eventName] || {};
+    COMPULSORY[lvl][eventName].forEach(function(skillName, idx){
+      var key = "s"+idx;
+      var rec = cbucket[eventName][key] || {};
+      var g1 = practiceRoleLine(rec, [["g1SideBase","Side"],["g1FrontBase","Front"],["g1BackBase","Back"],["g1Flyer","Flyer"]]);
+      var g2 = practiceRoleLine(rec, [["g2SideBase","Side"],["g2FrontBase","Front"],["g2BackBase","Back"],["g2Flyer","Flyer"]]);
+      var lines = [];
+      if(g1) lines.push("GROUP 1 — "+g1);
+      if(g2) lines.push("GROUP 2 — "+g2);
+      container.appendChild(practiceCard(skillName, eventName+" compulsory", lines.join("     ||     ")));
+    });
+  });
+
+  // Optional
+  container.appendChild(practiceSection("Optional"));
+  var obucket = getBucket(["optional", lvl]);
+  (obucket.acro||[]).forEach(function(rec,i){
+    var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
+    var sub = skillDesc(rec) || [rec.entry,rec.top,rec.dismount].filter(Boolean).join(" → ") || "(not set yet)";
+    container.appendChild(practiceCard("Acro — Element "+(i+1), sub, roles));
+  });
+  (obucket.pyramid||[]).forEach(function(rec,i){
+    var roles = practiceRoleLine(rec, [["bottomBase","Base"],["mid","Mid"],["flyer","Flyer"]]);
+    container.appendChild(practiceCard("Pyramid "+(i+1), skillDesc(rec) || rec.skill || "(not set yet)", roles));
+  });
+  if(obucket.toss){
+    [["synced","Toss — Synced"],["solo","Toss — Solo"]].forEach(function(p){
+      var rec = obucket.toss[p[0]];
+      if(rec){
+        var roles = practiceRoleLine(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
+        container.appendChild(practiceCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", roles));
+      }
+    });
+  }
+  (obucket.tumbling||[]).forEach(function(rec,i){
+    var names = (rec.athletes||[]).join(", ");
+    container.appendChild(practiceCard("Tumbling Pass "+(i+1), skillDesc(rec) || skillLabelFor("Tumbling", rec) || "(not set yet)", names?("Athlete(s): "+names):""));
+  });
+
+  // Team routine, in strict performance order
+  container.appendChild(practiceSection("Team Routine — in order"));
+  var tbucket = getBucket(["team", lvl]);
+  var segs = tbucket.segments || [];
+  if(!segs.length){
+    container.appendChild(el("div",{class:"pempty"},["No team routine segments built yet."]));
+  }
+  segs.forEach(function(seg, idx){
+    var groupsTxt = segmentPerformerGroupsText(seg);
+    var title = (idx+1)+". "+seg.category+(seg.synced?" — SYNCED":"");
+    container.appendChild(practiceCard(title, teamSkillLabel(seg) || "(skill not set yet)", groupsTxt?("Performers: "+groupsTxt):""));
+  });
+}
+
 /* ---------------- Top nav + render ---------------- */
+function renderModeSwitch(){
+  var sw = document.getElementById("modeSwitch");
+  sw.innerHTML = "";
+  [["practice","Practice"],["edit","Edit"]].forEach(function(m){
+    sw.appendChild(el("button",{class:"modebtn"+(state.mode===m[0]?" active":""), type:"button", onclick:function(){ state.mode=m[0]; save(); renderAll(); }},[m[1]]));
+  });
+}
 function renderNav(){
+  renderModeSwitch();
   var roundTabs = document.getElementById("roundTabs");
   roundTabs.innerHTML = "";
-  [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","My Export"],["judges","Judges"]].forEach(function(r){
-    var t = el("button",{class:"tab"+(state.round===r[0]?" active":""), type:"button", onclick:function(){ state.round=r[0]; renderAll(); }},[r[1]]);
-    roundTabs.appendChild(t);
-  });
+  if(state.mode==="edit"){
+    [["compulsory","Compulsory"],["optional","Optional"],["team","Team Routine"],["export","My Export"],["judges","Judges"]].forEach(function(r){
+      var t = el("button",{class:"tab"+(state.round===r[0]?" active":""), type:"button", onclick:function(){ state.round=r[0]; renderAll(); }},[r[1]]);
+      roundTabs.appendChild(t);
+    });
+  }
   var levelPills = document.getElementById("levelPills");
   levelPills.innerHTML = "";
   [3,4].forEach(function(l){
@@ -1284,6 +1404,7 @@ function renderAll(){
   renderNav();
   var app = document.getElementById("app");
   app.innerHTML = "";
+  if(state.mode==="practice"){ viewPractice(app); return; }
   if(state.round==="compulsory") viewCompulsory(app);
   else if(state.round==="optional") viewOptional(app);
   else if(state.round==="team") viewTeam(app);
