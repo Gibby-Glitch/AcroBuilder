@@ -33,43 +33,35 @@ vercel --prod
 
 Either way you'll get a live `https://....vercel.app` URL you can share with coaches or open on a tablet at the gym.
 
-## Turn on live sync (optional, free)
+## Turn on live sync (optional, free) — Supabase
 
-Without this, every device keeps its own local copy — an iPad filling out Group 1 won't show up on your laptop. Adding a free Firebase project makes every open tab/device see the same data update live (a small "Synced live" badge appears in the top bar once it's working).
+Without this, every device keeps its own local copy — an iPad won't show what you set up on your laptop. Adding a free Supabase project makes every device see the same data, live (the badge in the top bar changes from "Local only" to **Synced live**).
 
-1. Go to [console.firebase.google.com](https://console.firebase.google.com) → **Add project** → give it any name → you can decline Google Analytics.
-2. In the left sidebar, open **Build → Firestore Database** → **Create database** → start in **production mode** → pick any region close to you.
-3. Still in Firestore, go to the **Rules** tab and paste this (it allows read/write to just this one shared doc — fine for a small team tool that isn't handling sensitive data, but anyone with the link could technically read/edit it):
+1. Go to [supabase.com](https://supabase.com) → **New project** (any name, any region, set a database password and save it somewhere).
+2. In the left sidebar open **SQL Editor** → **New query**, paste this whole block, and click **Run**:
+   ```sql
+   create table public.team_sheets (
+     id text primary key,
+     payload jsonb not null,
+     updated_at timestamptz not null default now()
+   );
+   alter table public.team_sheets enable row level security;
+   create policy "team read"   on public.team_sheets for select to anon using (true);
+   create policy "team insert" on public.team_sheets for insert to anon with check (true);
+   create policy "team update" on public.team_sheets for update to anon using (true) with check (true);
+   alter publication supabase_realtime add table public.team_sheets;
    ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /acroScoreBuilder/{docId} {
-         allow read, write: if true;
-       }
-     }
-   }
-   ```
-   Click **Publish**.
-4. Back in the project, click the gear icon → **Project settings** → scroll to **Your apps** → click the **</>** (web) icon → register an app (no hosting needed) → copy the `firebaseConfig` object it shows you.
-5. Open `index.html`, find this line near the top of the `<script>` block:
+   (This lets anyone with your site link read/write that one table — fine for a small team tool with no sensitive data; the access code only keeps casual visitors out.)
+3. Go to **Project Settings → API**. Copy the **Project URL** and the **anon public** key.
+4. Open `index.html`, find these two lines, and paste the values between the quotes:
    ```js
-   var FIREBASE_CONFIG = null;
+   var SUPABASE_URL = "";
+   var SUPABASE_ANON_KEY = "";
    ```
-   Replace `null` with the config object you copied, e.g.:
-   ```js
-   var FIREBASE_CONFIG = {
-     apiKey: "AIza...",
-     authDomain: "your-project.firebaseapp.com",
-     projectId: "your-project",
-     storageBucket: "your-project.appspot.com",
-     messagingSenderId: "...",
-     appId: "..."
-   };
-   ```
-6. Commit and push (`git add -A && git commit -m "enable sync" && git push`) — Vercel redeploys automatically. Reopen the site and the badge should read **Synced live**.
+5. Commit and push — Vercel redeploys automatically.
+6. **Open the site on the computer that already has your setup FIRST** and wait for the badge to say **Synced live** — that uploads the computer's data as the shared copy. Then open it on the iPad and your setup appears. After that, edits on either device show up on the other within a second or so.
 
-Everyone who opens that URL now shares one sheet.
+Don't open a blank device first: if the shared copy doesn't exist yet, whichever device connects first with data becomes the shared copy.
 
 ## Access code
 
@@ -83,6 +75,6 @@ Edit the text in quotes, commit and push. Set it to `""` (empty string) to turn 
 
 ## Notes
 
-- Everything runs client-side in plain HTML/CSS/JS — nothing to configure beyond the optional Firebase step above, no server code.
-- Without Firebase configured, data entered on the page lives in that browser only — two people on two devices won't see each other's entries.
+- Everything runs client-side in plain HTML/CSS/JS — nothing to configure beyond the optional Supabase step above, no server code.
+- Without Supabase configured, data entered on the page lives in that browser only — two people on two devices won't see each other's entries.
 - Edit `index.html` directly to update the roster, skill tables, or point values — the data lives near the top of the `<script>` block in clearly labeled constants (`ATHLETES`, `COMPULSORY`, `TOSS_VALUES`, etc.).

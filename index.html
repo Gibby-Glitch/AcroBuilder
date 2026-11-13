@@ -284,33 +284,23 @@ table.judgetable td.jlabelcol{ width:44%; }
 <main id="app"></main>
 
 
-<!-- Firebase (only used if FIREBASE_CONFIG below is filled in - see README.md) -->
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<!-- Supabase client (only used if SUPABASE_URL / SUPABASE_ANON_KEY below are filled in - see README.md) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
 "use strict";
 
-/* ================= Live sync (Firebase Firestore) =================
-   Fill in FIREBASE_CONFIG below (from your Firebase project settings) to make
-   this page sync in real time across every device that opens it - iPad,
-   laptop, whatever. Leave it as null and the page works exactly as before:
-   each device keeps its own local copy only (localStorage), no sync.
-   Setup steps are in README.md. */
-var FIREBASE_CONFIG = null;
-/* Example:
-var FIREBASE_CONFIG = {
-  apiKey: "AIza...",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "...",
-  appId: "..."
-};
-*/
-var SYNC_DOC_PATH = ["acroScoreBuilder", "sharedTeam"]; // collection, doc id - one shared sheet for this team
+/* ================= Live sync (Supabase) =================
+   Fill in the two values below (Supabase dashboard -> Project Settings -> API)
+   to make this page sync in real time across every device that opens it.
+   Leave them empty and the page works exactly as before: each device keeps its
+   own local copy only (localStorage). Setup steps + the one SQL block to run
+   are in README.md. */
+var SUPABASE_URL = "https://lgsxcrlwoitdflgnvixb.supabase.co";       // e.g. "https://abcdxyz.supabase.co"
+var SUPABASE_ANON_KEY = "sb_publishable_76bULGIYTQyEIecAe0hrsA_vwnihOKh";  // publishable (public) key
+var SYNC_ROW_ID = "ducks-2026-2027"; // one shared sheet for this team
 
-var fbDocRef = null, fbReady = false, fbWriteTimer = null, fbLastPushedJSON = null, fbApplyingRemote = false;
+var sb = null, fbReady = false, fbWriteTimer = null, fbLastPushedJSON = null, fbApplyingRemote = false;
 
 function setSyncBadge(mode){
   var b = document.getElementById("syncBadge");
@@ -322,46 +312,67 @@ function setSyncBadge(mode){
   else { b.textContent="Local only"; }
 }
 
+function syncSnapshot(){
+  return { data: state.data, uid: state.uid, teamName: state.teamName, teamSize: state.teamSize };
+}
+var recentPushed = [];   // our own recent writes, so their echoes coming back are ignored
+function syncKey(p){ return JSON.stringify({data:p.data||{}, teamSize:p.teamSize||{}, teamName:p.teamName||""}); }
+function applyRemote(p){
+  if(!p) return;
+  var incoming = syncKey(p);
+  if(incoming === syncKey(state)) return;           // nothing new
+  if(recentPushed.indexOf(incoming) !== -1) return; // our own older write echoing back
+  fbApplyingRemote = true;
+  state.data = p.data || {};
+  state.uid = Math.max(state.uid||1, p.uid||1);
+  state.teamName = p.teamName || state.teamName;
+  state.teamSize = p.teamSize || state.teamSize || {};
+  try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub, teamSize:state.teamSize})); }catch(e){}
+  try{ renderAll(); }catch(e){}
+  fbApplyingRemote = false;
+}
+
 function fbInit(){
-  if(!FIREBASE_CONFIG){ setSyncBadge("local"); return; }
-  if(typeof firebase === "undefined"){ setSyncBadge("err"); return; }
+  if(!SUPABASE_URL || !SUPABASE_ANON_KEY){ setSyncBadge("local"); return; }
+  if(typeof supabase === "undefined"){ setSyncBadge("err"); return; }
   try{
     setSyncBadge("connecting");
-    firebase.initializeApp(FIREBASE_CONFIG);
-    var db = firebase.firestore();
-    fbDocRef = db.collection(SYNC_DOC_PATH[0]).doc(SYNC_DOC_PATH[1]);
-    fbDocRef.onSnapshot(function(snap){
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // 1) load the shared sheet (or upload this device's data if none exists yet)
+    sb.from("team_sheets").select("payload").eq("id", SYNC_ROW_ID).maybeSingle().then(function(res){
+      if(res.error){ console.warn("Sync load failed:", res.error); setSyncBadge("err"); return; }
       fbReady = true;
-      setSyncBadge("live");
-      if(!snap.exists) return;
-      var remote = snap.data();
-      if(!remote) return;
-      var remoteJSON = JSON.stringify(remote.data||{});
-      if(remoteJSON === fbLastPushedJSON) return; // our own write echoing back - ignore
-      fbApplyingRemote = true;
-      state.data = remote.data || {};
-      state.uid = remote.uid || state.uid;
-      state.teamName = remote.teamName || state.teamName;
-      try{ renderAll(); }catch(e){}
-      fbApplyingRemote = false;
-    }, function(err){
-      console.warn("Sync listen failed:", err);
-      setSyncBadge("err");
+      if(res.data && res.data.payload){
+        applyRemote(res.data.payload);
+      } else if(state.data && Object.keys(state.data).length){
+        // First time ever: this device's existing setup becomes the shared copy.
+        fbPush(true);
+      }
     });
+    // 2) listen for changes from other devices
+    sb.channel("team_sheets_live")
+      .on("postgres_changes", {event:"*", schema:"public", table:"team_sheets", filter:"id=eq."+SYNC_ROW_ID}, function(evt){
+        if(evt.new && evt.new.payload) applyRemote(evt.new.payload);
+      })
+      .subscribe(function(status){
+        if(status==="SUBSCRIBED") setSyncBadge("live");
+        else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT") setSyncBadge("err");
+      });
   }catch(e){
-    console.warn("Firebase init failed:", e);
+    console.warn("Supabase init failed:", e);
     setSyncBadge("err");
   }
 }
 
-function fbPush(){
-  if(!fbDocRef || fbApplyingRemote) return;
+function fbPush(immediate){
+  if(!sb || fbApplyingRemote) return;
   clearTimeout(fbWriteTimer);
   fbWriteTimer = setTimeout(function(){
-    var payload = { data: state.data, uid: state.uid, teamName: state.teamName, _updatedAt: Date.now() };
-    fbLastPushedJSON = JSON.stringify(payload.data);
-    fbDocRef.set(payload).catch(function(e){ console.warn("Sync push failed:", e); setSyncBadge("err"); });
-  }, 500);
+    var payload = syncSnapshot();
+    recentPushed.push(syncKey(payload)); if(recentPushed.length>10) recentPushed.shift();
+    sb.from("team_sheets").upsert({ id: SYNC_ROW_ID, payload: payload, updated_at: new Date().toISOString() })
+      .then(function(res){ if(res.error){ console.warn("Sync push failed:", res.error); setSyncBadge("err"); } });
+  }, immediate ? 0 : 500);
 }
 
 /* ================= Simple team access code =================
