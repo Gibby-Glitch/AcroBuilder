@@ -62,7 +62,36 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 }
 .pill.active{background:var(--fg); color:var(--bg); border-color:var(--fg);}
 
-main{max-width:760px; margin:0 auto; padding-bottom:60px;}
+.layout{ display:flex; align-items:flex-start; gap:22px; max-width:1100px; margin:0 auto; }
+main{flex:1 1 0; min-width:0; max-width:760px; padding-bottom:60px;}
+.usage{
+  flex:0 0 310px; width:310px; position:sticky; top:150px; max-height:calc(100vh - 170px); overflow-y:auto;
+  margin-top:14px; background:var(--surface); border:2px solid var(--accent); border-radius:12px; padding:12px 14px 14px;
+}
+.usagehead{ display:flex; align-items:center; gap:8px; cursor:pointer; background:none; border:none; width:100%; padding:0; color:var(--fg); text-align:left; }
+.usagehead h2{ font-size:15px; flex:1; }
+.usagechev{ font-size:13px; color:var(--accent); }
+.usagesummary{ font-size:12.5px; color:var(--fg-dim); margin:6px 0 8px; }
+.usagesummary b{ color:var(--fg); }
+.usagesort{ display:flex; gap:6px; margin-bottom:8px; }
+.usagesort .pill{ font-size:11.5px; padding:3px 10px; }
+.uitem{ border-top:1px solid var(--border); }
+.urow{ display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; padding:8px 0; color:var(--fg); text-align:left; font-size:14px; }
+.uname{ flex:1; font-weight:600; min-width:0; }
+.uarrow{ color:var(--fg-dim); font-size:11px; width:12px; }
+.ucount{ min-width:26px; text-align:center; font-family:var(--font-mono); font-weight:700; font-size:12.5px; border-radius:999px; padding:2px 8px; background:var(--accent); color:var(--accent-fg); }
+.ucount.zero{ background:var(--bad); color:#fff; }
+.ucount.low{ background:var(--warn); color:#fff; }
+.uwhere{ padding:0 0 10px 20px; display:flex; flex-direction:column; gap:5px; }
+.uspot{ font-size:12.5px; line-height:1.35; }
+.uspot .usec{ display:block; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent); }
+.uspot .utag{ color:var(--warn); font-weight:700; }
+.uempty{ font-size:12.5px; color:var(--fg-dim); font-style:italic; }
+@media (max-width:1049px){
+  .layout{ flex-direction:column-reverse; gap:0; }
+  main{ max-width:none; width:100%; }
+  .usage{ position:static; width:100%; flex:none; max-height:none; margin:12px 0 0; }
+}
 .sectiontitle{font-size:15px; margin:22px 0 10px; display:flex; align-items:baseline; gap:8px; justify-content:space-between;}
 .sectiontitle .req{font-family:var(--font-mono); font-size:12px; color:var(--fg-dim); font-weight:400;}
 
@@ -169,7 +198,7 @@ table.judgetable td.jscore{ text-align:center; font-weight:700; }
 table.judgetable td.jcol{ width:14%; }
 table.judgetable td.jlabelcol{ width:44%; }
 @media print{
-  .topbar,.ghostbtn,.removebtn,select,input,.athletepicker{display:none !important;}
+  .topbar,.ghostbtn,.removebtn,select,input,.athletepicker,.usage{display:none !important;}
   body{background:#fff !important;}
   .judgesheet{border:none; padding:0;}
   .judgesheet, .judgesheet *{ color:#161616 !important; }
@@ -281,7 +310,10 @@ table.judgetable td.jlabelcol{ width:44%; }
   </div>
 </div>
 
-<main id="app"></main>
+<div class="layout">
+  <main id="app"></main>
+  <aside id="usage" class="usage"></aside>
+</div>
 
 
 <!-- Supabase client (only used if SUPABASE_URL / SUPABASE_ANON_KEY below are filled in - see README.md) -->
@@ -315,6 +347,11 @@ function setSyncBadge(mode){
 function syncSnapshot(){
   return { data: state.data, uid: state.uid, teamName: state.teamName, teamSize: state.teamSize };
 }
+function hasContent(v){   // true if there is any real entry (a non-empty list) anywhere in the data
+  if(Array.isArray(v)) return v.length>0;
+  if(v && typeof v==="object") return Object.keys(v).some(function(k){ return hasContent(v[k]); });
+  return false;
+}
 var recentPushed = [];   // our own recent writes, so their echoes coming back are ignored
 function syncKey(p){ return JSON.stringify({data:p.data||{}, teamSize:p.teamSize||{}, teamName:p.teamName||""}); }
 function applyRemote(p){
@@ -322,6 +359,8 @@ function applyRemote(p){
   var incoming = syncKey(p);
   if(incoming === syncKey(state)) return;           // nothing new
   if(recentPushed.indexOf(incoming) !== -1) return; // our own older write echoing back
+  // Safety net: keep a copy of this device's own data before a remote copy replaces it.
+  try{ if(hasContent(state.data)) localStorage.setItem("acroScoreBuilder_backupBeforeSync", JSON.stringify({savedAt:new Date().toISOString(), data:state.data, uid:state.uid, teamName:state.teamName, teamSize:state.teamSize})); }catch(e){}
   fbApplyingRemote = true;
   state.data = p.data || {};
   state.uid = Math.max(state.uid||1, p.uid||1);
@@ -344,7 +383,7 @@ function fbInit(){
       fbReady = true;
       if(res.data && res.data.payload){
         applyRemote(res.data.payload);
-      } else if(state.data && Object.keys(state.data).length){
+      } else if(hasContent(state.data)){
         // First time ever: this device's existing setup becomes the shared copy.
         fbPush(true);
       }
@@ -366,6 +405,7 @@ function fbInit(){
 
 function fbPush(immediate){
   if(!sb || fbApplyingRemote) return;
+  if(!hasContent(state.data)) return;   // never upload an empty sheet over a shared one
   clearTimeout(fbWriteTimer);
   fbWriteTimer = setTimeout(function(){
     var payload = syncSnapshot();
@@ -522,6 +562,7 @@ function load(){
 }
 function save(){
   try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub, teamSize:state.teamSize})); }catch(e){}
+  try{ renderUsage(); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -1828,17 +1869,140 @@ function renderNav(){
     levelPills.appendChild(p);
   });
 }
+/* ---------------- Athlete usage side panel ----------------
+   Counts every spot each athlete has been given at the current level
+   (Compulsory roles, Optional roles, Team Routine segments) so it's easy to
+   see who is under-used, and expands to show exactly where. */
+var ROLE_LABELS = {sideBase:"Side Base", frontBase:"Front Base", backBase:"Back Base", flyer:"Flyer", bottomBase:"Bottom Base", mid:"Mid", catcher:"Catcher", athletes:"Tumbler", tumblers:"Tumbler"};
+var usageCollapsed = (window.innerWidth < 1050);
+var usageSort = "fewest";
+var usageExpanded = {};
+function computeUsage(lvl){
+  var uses = {};
+  ATHLETES.forEach(function(n){ uses[n] = []; });
+  function add(names, sec, where, role){
+    (names||[]).forEach(function(n){
+      if(!uses[n]) uses[n] = [];
+      uses[n].push({sec:sec, where:where, role:role});
+    });
+  }
+  function roles(rec, keys, prefixLabel, sec, where){
+    if(!rec) return;
+    keys.forEach(function(k){
+      if(rec[k+"_na"]) return;
+      var base = k.replace(/^g[12]/,"");
+      base = base.charAt(0).toLowerCase()+base.slice(1);
+      add(rec[k], sec, where, (prefixLabel?prefixLabel+" · ":"")+(ROLE_LABELS[base]||base));
+    });
+  }
+  var c = state.data.compulsory && state.data.compulsory[lvl];
+  if(c && COMPULSORY[lvl]){
+    Object.keys(COMPULSORY[lvl]).forEach(function(ev){
+      var names = COMPULSORY[lvl][ev], evB = c[ev]||{};
+      var order = (Array.isArray(evB.order) && evB.order.length===names.length) ? evB.order : names.map(function(_,i){return i;});
+      order.forEach(function(idx){
+        var rec = evB["s"+idx]; if(!rec) return;
+        var sec = "Compulsory "+ev, where = names[idx];
+        if(ev==="Tumbling"){ add(rec.tumblers, sec, where, "Tumbler"); }
+        else if(ev==="Pyramid"){
+          ["g1","g2"].forEach(function(g,gi){
+            roles(rec, ["BottomBase","Mid","Flyer","FrontBase","BackBase","SideBase","Catcher"].map(function(x){return g+x;}), "Pyramid "+(gi+1), sec, where);
+          });
+        } else {
+          ["g1","g2"].forEach(function(g,gi){
+            roles(rec, ["SideBase","FrontBase","BackBase","Flyer"].map(function(x){return g+x;}), "Group "+(gi+1), sec, where);
+          });
+        }
+      });
+    });
+  }
+  var o = state.data.optional && state.data.optional[lvl];
+  if(o){
+    (o.acro||[]).forEach(function(r,i){ roles(r, ["sideBase","frontBase","backBase","flyer"], "", "Optional Acro", "Element "+(i+1)); });
+    (o.pyramid||[]).forEach(function(r,i){ roles(r, ["bottomBase","mid","flyer","frontBase","backBase","sideBase","catcher"], "", "Optional Pyramid", "Pyramid "+(i+1)); });
+    if(o.toss){
+      [["synced","Synced Toss"],["solo","Solo Toss"]].forEach(function(p){
+        roles(o.toss[p[0]], ["sideBase","frontBase","backBase","flyer"], "", "Optional Toss", p[1]);
+      });
+    }
+    (o.tumbling||[]).forEach(function(r,i){ add(r.athletes, "Optional Tumbling", "Pass "+(i+1), "Tumbler"); });
+  }
+  var t = state.data.team && state.data.team[lvl];
+  if(t && t.segments){
+    t.segments.forEach(function(seg,i){
+      var lbl = teamSkillLabel(seg);
+      var where = "#"+(i+1)+" "+seg.category+(lbl?" — "+lbl:"");
+      var n = (seg.instances||[]).length;
+      (seg.instances||[]).forEach(function(inst,j){
+        var rolesHere = ["sideBase","frontBase","backBase","flyer","bottomBase","mid","catcher","athletes"];
+        rolesHere.forEach(function(k){
+          if(inst[k] && inst[k].length){
+            var pre = n>1 ? "Group "+(j+1)+" · " : "";
+            add(inst[k], "Team Routine"+(seg.filler?" (filler)":""), where, pre+(ROLE_LABELS[k]||k));
+          }
+        });
+      });
+    });
+  }
+  return uses;
+}
+function renderUsage(){
+  var box = document.getElementById("usage");
+  if(!box) return;
+  box.innerHTML = "";
+  var lvl = state.level;
+  var uses = computeUsage(lvl);
+  var names = Object.keys(uses);
+  var zero = names.filter(function(n){ return uses[n].length===0; }).length;
+  var head = el("button",{class:"usagehead", type:"button", onclick:function(){ usageCollapsed=!usageCollapsed; renderUsage(); }},[
+    el("h2",{},["Athlete spots — Level "+lvl]), el("span",{class:"usagechev"},[usageCollapsed?"▸ Show":"▾ Hide"])
+  ]);
+  box.appendChild(head);
+  if(usageCollapsed) return;
+  box.appendChild(el("div",{class:"usagesummary"},[
+    el("b",{},[String(names.length)]), " athletes · ",
+    zero ? el("b",{style:"color:var(--bad);"},[zero+" with no spot yet"]) : el("b",{},["everyone has a spot"])
+  ]));
+  var sortRow = el("div",{class:"usagesort"});
+  [["fewest","Fewest first"],["alpha","A–Z"]].forEach(function(o){
+    sortRow.appendChild(el("button",{class:"pill"+(usageSort===o[0]?" active":""), type:"button", onclick:function(){ usageSort=o[0]; renderUsage(); }},[o[1]]));
+  });
+  box.appendChild(sortRow);
+  names.sort(function(a,b){
+    if(usageSort==="fewest"){ var d = uses[a].length-uses[b].length; if(d) return d; }
+    return a.localeCompare(b);
+  });
+  names.forEach(function(n){
+    var list = uses[n], open = !!usageExpanded[n];
+    var item = el("div",{class:"uitem"});
+    item.appendChild(el("button",{class:"urow", type:"button", onclick:function(){ usageExpanded[n]=!usageExpanded[n]; renderUsage(); }},[
+      el("span",{class:"uarrow"},[open?"▼":"▶"]),
+      el("span",{class:"uname"},[n]),
+      el("span",{class:"ucount"+(list.length===0?" zero":(list.length===1?" low":""))},[String(list.length)])
+    ]));
+    if(open){
+      var where = el("div",{class:"uwhere"});
+      if(!list.length) where.appendChild(el("div",{class:"uempty"},["Not in any spot yet at this level."]));
+      list.forEach(function(u){
+        where.appendChild(el("div",{class:"uspot"},[ el("span",{class:"usec"},[u.sec]), u.where+" — "+u.role ]));
+      });
+      item.appendChild(where);
+    }
+    box.appendChild(item);
+  });
+}
 function renderTeam(){ var app=document.getElementById("app"); app.innerHTML=""; viewTeam(app); }
 function renderAll(){
   renderNav();
   var app = document.getElementById("app");
   app.innerHTML = "";
-  if(state.mode==="practice"){ viewPractice(app); return; }
-  if(state.round==="compulsory") viewCompulsory(app);
+  if(state.mode==="practice") viewPractice(app);
+  else if(state.round==="compulsory") viewCompulsory(app);
   else if(state.round==="optional") viewOptional(app);
   else if(state.round==="team") viewTeam(app);
   else if(state.round==="judges") viewJudges(app);
   else viewExport(app);
+  renderUsage();
 }
 
 load();
