@@ -1028,7 +1028,24 @@ function pyramidSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
   return card;
 }
 
-function tossSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
+/* A synced toss is performed by 2-9 groups at once, each with its own set of toss positions.
+   Group 1 lives on the record itself; groups 2..N live in rec.extraGroups. Reducing the group
+   count only hides the extra groups (their athletes are kept), so nothing is ever wiped. */
+function tossGroups(rec, minGroups){
+  rec = rec || {};
+  var n = Math.max(minGroups||1, Math.min(9, rec.groupCount||minGroups||1));
+  var extras = rec.extraGroups || [];
+  var out = [rec];
+  for(var i=0;i<n-1;i++) out.push(extras[i] || {});
+  return out;
+}
+function syncedGroupsText(rec){
+  return tossGroups(rec, 2).map(function(g){
+    var names=[]; ["sideBase","frontBase","backBase","flyer"].forEach(function(k){ if(g[k] && g[k].length) names = names.concat(g[k]); });
+    return names.join("/");
+  }).filter(function(t){ return t; }).join(", ");
+}
+function tossSkillCard(rec, level, onRemove, title, onUpdate, hideRoles, syncedGroups){
   var options = TOSS_VALUES[level];
   rec.skill = rec.skill || Object.keys(options)[0];
   var card = el("div",{class:"card"});
@@ -1048,12 +1065,27 @@ function tossSkillCard(rec, level, onRemove, title, onUpdate, hideRoles){
       scoreLabel = "Whole-skill value";
     }
     if(!hideRoles){
-      var r2 = el("div",{class:"row"});
-      r2.appendChild(rolePicker(rec, "sideBase", "Side Base(s)"));
-      r2.appendChild(rolePicker(rec, "frontBase", "Front Base"));
-      r2.appendChild(rolePicker(rec, "backBase", "Back Base(s)"));
-      r2.appendChild(rolePicker(rec, "flyer", "Flyer(s)"));
-      card.appendChild(r2);
+      function tossRoleRow(g){
+        var r2 = el("div",{class:"row"});
+        r2.appendChild(rolePicker(g, "sideBase", "Side Base(s)"));
+        r2.appendChild(rolePicker(g, "frontBase", "Front Base"));
+        r2.appendChild(rolePicker(g, "backBase", "Back Base(s)"));
+        r2.appendChild(rolePicker(g, "flyer", "Flyer(s)"));
+        return r2;
+      }
+      if(syncedGroups){
+        rec.groupCount = Math.max(2, Math.min(9, rec.groupCount||2));
+        rec.extraGroups = rec.extraGroups || [];
+        while(rec.extraGroups.length < 8) rec.extraGroups.push({});
+        var countOpts = [2,3,4,5,6,7,8,9].map(function(n){ return [String(n), n+" groups performing together"]; });
+        card.appendChild(el("div",{class:"row"},[ field("Number of synced groups", selectEl(countOpts, rec.groupCount, function(val){ rec.groupCount = parseInt(val,10)||2; render(); save(); })) ]));
+        tossGroups(rec, 2).forEach(function(g, gi){
+          card.appendChild(el("div",{style:"font-weight:700;font-size:11.5px;margin:12px 0 6px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.03em;"},["Group "+(gi+1)]));
+          card.appendChild(tossRoleRow(g));
+        });
+      } else {
+        card.appendChild(tossRoleRow(rec));
+      }
     }
     rec._value = v;
     card.appendChild(el("div",{class:"scoreline"},[ el("span",{class:"lbl"},[scoreLabel]), el("span",{class:"val"},[v.toFixed(1)]) ]));
@@ -1307,11 +1339,11 @@ function viewOptional(container){
   container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Pyramid optional start value — average of "+pyrN+" pyramids"]), el("span",{class:"big"},[(pyrN?Math.round(pyrTotal/pyrN*100)/100:0).toFixed(2)]) ]));
 
   // Toss — exactly one synced + one solo slot (the two required categories, not reorderable)
-  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced + 1 solo · whole-skill value, max 10.0"]) ]));
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced (2–9 groups) + 1 solo · whole-skill value, max 10.0"]) ]));
   bucket.toss = bucket.toss || {};
   bucket.toss.synced = bucket.toss.synced || {};
   bucket.toss.solo = bucket.toss.solo || {};
-  var syncCard = tossSkillCard(bucket.toss.synced, lvl, null, "Synced Toss", refreshOptional);
+  var syncCard = tossSkillCard(bucket.toss.synced, lvl, null, "Synced Toss", refreshOptional, false, true);
   syncCard.appendChild(startValueLine("Toss", lvl, bucket.toss.synced));
   container.appendChild(syncCard);
   var soloCard = tossSkillCard(bucket.toss.solo, lvl, null, "Solo Toss", refreshOptional);
@@ -1557,7 +1589,8 @@ function buildExportText(){
     if(o.toss){
       var tt = optAvg("Toss", lvl, [o.toss.synced, o.toss.solo]);
       lines.push("\nToss — start value (average of synced + solo, each max 10.0) = "+tt.toFixed(2));
-      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+optStart("Toss",lvl,o.toss.synced).toFixed(2)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base(s)")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
+      lines.push("  Synced ("+tossGroups(o.toss.synced,2).length+" groups): "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+optStart("Toss",lvl,o.toss.synced).toFixed(2)+")");
+      tossGroups(o.toss.synced,2).forEach(function(g,gi){ lines.push("    Group "+(gi+1)+" — "+roleExport(g,"sideBase","Side Base")+" "+roleExport(g,"frontBase","Front Base")+" "+roleExport(g,"backBase","Back Base(s)")+" "+roleExport(g,"flyer","Flyer")); });
       lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+optStart("Toss",lvl,o.toss.solo).toFixed(2)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base(s)")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
     }
     if(o.tumbling){
@@ -1668,7 +1701,7 @@ function viewJudges(container){
     wrap.appendChild(judgeBlock("PYRAMID ("+o.pyramid.length+")", pyrRows));
   }
   if(o.toss && o.toss.synced){
-    var sNames = instanceNames(o.toss.synced).join(", "), oNames = instanceNames(o.toss.solo).join(", ");
+    var sNames = syncedGroupsText(o.toss.synced), oNames = instanceNames(o.toss.solo).join(", ");
     var tossRows = [
       {text: skillLabelFor("Toss", o.toss.synced)+" (sync)"+(sNames?" ("+sNames+")":"")+"  "+optStart("Toss",lvl,o.toss.synced).toFixed(2)},
       {text: skillLabelFor("Toss", o.toss.solo)+" (solo)"+(oNames?" ("+oNames+")":"")+"  "+optStart("Toss",lvl,o.toss.solo).toFixed(2)}
@@ -1893,8 +1926,13 @@ function viewPracticeOptionalSub(container, cat){
     [["synced","Synced Toss"],["solo","Solo Toss"]].forEach(function(p){
       var rec = obucket.toss[p[0]];
       if(rec){
-        var rows = practiceRoleRows(rec, [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]]);
-        container.appendChild(practiceFlatRoleCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", rows));
+        var tpairs = [["sideBase","Side"],["frontBase","Front"],["backBase","Back"],["flyer","Flyer"]];
+        if(p[0]==="synced"){
+          container.appendChild(practiceGroupCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)",
+            tossGroups(rec, 2).map(function(g,gi){ return {label:"GROUP "+(gi+1), rows: practiceRoleRows(g, tpairs)}; })));
+        } else {
+          container.appendChild(practiceFlatRoleCard(p[1], skillDesc(rec) || rec.skill || "(not set yet)", practiceRoleRows(rec, tpairs)));
+        }
       }
     });
   } else {
@@ -2019,9 +2057,10 @@ function computeUsage(lvl){
     (o.acro||[]).forEach(function(r,i){ roles(r, ["sideBase","frontBase","backBase","flyer"], "", "Optional Acro", "Element "+(i+1)); });
     (o.pyramid||[]).forEach(function(r,i){ roles(r, ["bottomBase","mid","flyer","frontBase","backBase","sideBase","catcher"], "", "Optional Pyramid", "Pyramid "+(i+1)); });
     if(o.toss){
-      [["synced","Synced Toss"],["solo","Solo Toss"]].forEach(function(p){
-        roles(o.toss[p[0]], ["sideBase","frontBase","backBase","flyer"], "", "Optional Toss", p[1]);
+      tossGroups(o.toss.synced, 2).forEach(function(g, gi){
+        roles(g, ["sideBase","frontBase","backBase","flyer"], "Group "+(gi+1), "Optional Toss", "Synced Toss");
       });
+      roles(o.toss.solo, ["sideBase","frontBase","backBase","flyer"], "", "Optional Toss", "Solo Toss");
     }
     (o.tumbling||[]).forEach(function(r,i){ add(r.athletes, "Optional Tumbling", "Pass "+(i+1), "Tumbler"); });
   }
