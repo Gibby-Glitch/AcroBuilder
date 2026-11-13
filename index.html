@@ -87,10 +87,27 @@ main{flex:1 1 0; min-width:0; max-width:760px; padding-bottom:60px;}
 .uspot .usec{ display:block; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent); }
 .uspot .utag{ color:var(--warn); font-weight:700; }
 .uempty{ font-size:12.5px; color:var(--fg-dim); font-style:italic; }
+.layout.hasreqs{ max-width:1420px; }
+.reqs{
+  flex:0 0 235px; width:235px; position:sticky; top:150px; max-height:calc(100vh - 170px); overflow-y:auto;
+  margin-top:14px; background:var(--surface); border:2px solid var(--accent); border-radius:12px; padding:12px 14px 6px;
+}
+.reqs h2{ font-size:15px; }
+.reqs .reqsub{ font-size:12px; color:var(--fg-dim); margin:4px 0 8px; }
+.reqs .reqitem{ border-top:1px solid var(--border); padding:9px 0; }
+.reqs .rname{ font-weight:700; font-size:13.5px; }
+.reqs .rdetail{ font-size:11.5px; color:var(--fg-dim); margin-top:1px; }
+.reqs .rstatus{ font-family:var(--font-mono); font-size:12.5px; font-weight:700; margin-top:4px; display:flex; align-items:center; }
+.reqs .rneed{ font-size:11.5px; font-weight:700; color:var(--warn); margin-top:2px; }
+.jreqcheck{ border:2px solid var(--fg); border-radius:6px; padding:8px 12px; margin:10px 0 18px; font-size:13px; }
+.jreqcheck .jreqhead{ font-weight:800; letter-spacing:.03em; text-transform:uppercase; margin-bottom:4px; }
+.jreqcheck.bad .jreqhead{ color:var(--bad); }
+.jreqcheck .jreqline{ margin:2px 0; }
 @media (max-width:1049px){
-  .layout{ flex-direction:column-reverse; gap:0; }
-  main{ max-width:none; width:100%; }
-  .usage{ position:static; width:100%; flex:none; max-height:none; margin:12px 0 0; }
+  .layout{ flex-direction:column; gap:0; }
+  main{ max-width:none; width:100%; order:0; }
+  .usage{ position:static; width:100%; flex:none; max-height:none; margin:12px 0 0; order:-1; }
+  .reqs{ position:static; width:100%; flex:none; max-height:none; margin:12px 0 0; order:-2; }
 }
 .sectiontitle{font-size:15px; margin:22px 0 10px; display:flex; align-items:baseline; gap:8px; justify-content:space-between;}
 .sectiontitle .req{font-family:var(--font-mono); font-size:12px; color:var(--fg-dim); font-weight:400;}
@@ -206,7 +223,7 @@ table.judgetable td.jscore{ text-align:center; font-weight:700; }
 table.judgetable td.jcol{ width:14%; }
 table.judgetable td.jlabelcol{ width:44%; }
 @media print{
-  .topbar,.ghostbtn,.removebtn,select,input,.athletepicker,.usage{display:none !important;}
+  .topbar,.ghostbtn,.removebtn,select,input,.athletepicker,.usage,.reqs{display:none !important;}
   body{background:#fff !important;}
   .judgesheet{border:none; padding:0;}
   .judgesheet, .judgesheet *{ color:#161616 !important; }
@@ -318,7 +335,8 @@ table.judgetable td.jlabelcol{ width:44%; }
   </div>
 </div>
 
-<div class="layout">
+<div class="layout" id="layout">
+  <aside id="reqs" class="reqs" hidden></aside>
   <main id="app"></main>
   <aside id="usage" class="usage"></aside>
 </div>
@@ -660,7 +678,7 @@ function load(){
 }
 function save(){
   try{ localStorage.setItem("acroScoreBuilder_v1", JSON.stringify({data:state.data, uid:state.uid, teamName:state.teamName, mode:state.mode, practiceRound:state.practiceRound, practiceSub:state.practiceSub, teamSize:state.teamSize})); }catch(e){}
-  try{ renderUsage(); }catch(e){}
+  try{ renderUsage(); renderReqs(); }catch(e){}
   fbPush();
 }
 function nid(){ return "n"+(state.uid++); }
@@ -1443,35 +1461,82 @@ function instanceRoleFields(category, inst){
   }
   return fields;
 }
-function viewTeam(container){
-  var lvl = state.level;
+/* Requirement tally - a synced moment performed by N groups at once counts N toward the
+   category total (that's how the real judge sheet counts them). Filler segments never count. */
+function teamTally(lvl){
   var bucket = getBucket(["team", lvl]);
-  bucket.segments = bucket.segments || [];
-
-  // Requirement tally - a synced moment performed by N groups at once counts N
-  // toward the category total (that's how the real judge sheet counts them).
   var tally = {}; Object.keys(TEAM_REQ[lvl]).forEach(function(k){ tally[k]={n:0,synced:0}; });
-  bucket.segments.forEach(function(seg){
-    if(seg.filler) return; // filler segments don't count toward requirements
+  (bucket.segments||[]).forEach(function(seg){
+    if(seg.filler) return;
     if(tally[seg.category]){
       var cnt = (seg.instances && seg.instances.length) || 1;
       tally[seg.category].n += cnt;
       if(seg.synced) tally[seg.category].synced += cnt;
     }
   });
-
-  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Team Routine Requirements"]), el("span",{class:"req"},["Level "+lvl]) ]));
-  var grid = el("div",{class:"reqgrid"});
+  return tally;
+}
+function teamReqStatus(lvl){
+  var tally = teamTally(lvl), out = [];
   Object.keys(TEAM_REQ[lvl]).forEach(function(cat){
     var r = TEAM_REQ[lvl][cat], t = tally[cat];
-    var met = t.n>=r.n && t.synced>=r.synced;
-    grid.appendChild(el("div",{class:"reqcard"},[
-      el("span",{class:"name"},[cat+" — "+r.n+" elements"+(r.synced?", min "+r.synced+" synced":"")]),
-      el("span",{class:"status "+(met?"met":"pending")},[ el("span",{class:"dot "+(met?"met":"pending")}), t.n+"/"+r.n+(r.synced? " · "+t.synced+"/"+r.synced+" synced":"") ])
-    ]));
+    var needN = Math.max(0, r.n - t.n), needS = Math.max(0, (r.synced||0) - t.synced);
+    out.push({cat:cat, r:r, t:t, needN:needN, needS:needS, met:(needN===0 && needS===0)});
   });
-  container.appendChild(grid);
+  return out;
+}
+/* Left-hand sticky panel on the Team Routine tab (Edit mode): quick-reference checklist
+   that stays on screen while you add segments. */
+function renderReqs(){
+  var box = document.getElementById("reqs"), layout = document.getElementById("layout");
+  if(!box) return;
+  var show = (state.round==="team" && state.mode==="edit");
+  box.hidden = !show;
+  if(layout){ if(show) layout.classList.add("hasreqs"); else layout.classList.remove("hasreqs"); }
+  box.innerHTML = "";
+  if(!show) return;
+  var lvl = state.level, st = teamReqStatus(lvl);
+  var metCount = st.filter(function(x){ return x.met; }).length;
+  box.appendChild(el("h2",{},["Team Routine Requirements"]));
+  box.appendChild(el("div",{class:"reqsub"},["Level "+lvl+" · "+metCount+" of "+st.length+" met"]));
+  st.forEach(function(x){
+    var item = el("div",{class:"reqitem"});
+    item.appendChild(el("div",{class:"rname"},[x.cat]));
+    item.appendChild(el("div",{class:"rdetail"},[x.r.n+" elements"+(x.r.synced?" · min "+x.r.synced+" synced":"")]));
+    item.appendChild(el("div",{class:"rstatus status "+(x.met?"met":"pending")},[
+      el("span",{class:"dot "+(x.met?"met":"pending")}), x.t.n+"/"+x.r.n+(x.r.synced?" · "+x.t.synced+"/"+x.r.synced+" synced":"")
+    ]));
+    if(!x.met){
+      var need = [];
+      if(x.needN) need.push(x.needN+" more element"+(x.needN>1?"s":""));
+      if(x.needS) need.push(x.needS+" more synced");
+      item.appendChild(el("div",{class:"rneed"},["Need "+need.join(" + ")]));
+    }
+    box.appendChild(item);
+  });
+}
+function teamRequirementCheck(lvl){
+  var st = teamReqStatus(lvl), missing = st.filter(function(x){ return !x.met; });
+  var box = el("div",{class:"jreqcheck"+(missing.length?" bad":"")});
+  if(!missing.length){
+    box.appendChild(el("div",{class:"jreqhead"},["Team routine requirements: all met"]));
+    return box;
+  }
+  box.appendChild(el("div",{class:"jreqhead"},["Requirements not met — team routine"]));
+  missing.forEach(function(x){
+    var bits = [];
+    if(x.needN) bits.push(x.t.n+" of "+x.r.n+" required elements (missing "+x.needN+")");
+    if(x.needS) bits.push(x.t.synced+" of "+x.r.synced+" required synced (missing "+x.needS+")");
+    box.appendChild(el("div",{class:"jreqline"},["• "+x.cat+": "+bits.join("; ")]));
+  });
+  return box;
+}
+function viewTeam(container){
+  var lvl = state.level;
+  var bucket = getBucket(["team", lvl]);
+  bucket.segments = bucket.segments || [];
 
+  // (The requirements checklist lives in the sticky left-hand panel - see renderReqs.)
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Segments — in performance order"]) ]));
   var segWrap = el("div",{});
   bucket.segments.forEach(function(seg, idx){
@@ -1768,6 +1833,7 @@ function viewJudges(container){
     rows.push({text: (avgParts.join(", ")||"(no segments scored yet)") });
     rows.push({text:"SV: "+totalSV.toFixed(2), score:true});
     wrap.appendChild(judgeBlock("SKILLS — IN ORDER", rows));
+    wrap.appendChild(teamRequirementCheck(lvl));
   }
 
   container.appendChild(wrap);
@@ -2162,6 +2228,7 @@ function renderAll(){
   else if(state.round==="judges") viewJudges(app);
   else viewExport(app);
   renderUsage();
+  renderReqs();
 }
 
 load();
