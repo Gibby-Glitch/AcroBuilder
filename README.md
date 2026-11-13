@@ -78,3 +78,10 @@ Edit the text in quotes, commit and push. Set it to `""` (empty string) to turn 
 - Everything runs client-side in plain HTML/CSS/JS — nothing to configure beyond the optional Supabase step above, no server code.
 - Without Supabase configured, data entered on the page lives in that browser only — two people on two devices won't see each other's entries.
 - Edit `index.html` directly to update the roster, skill tables, or point values — the data lives near the top of the `<script>` block in clearly labeled constants (`ATHLETES`, `COMPULSORY`, `TOSS_VALUES`, etc.).
+
+## Backups & restore (protects your work)
+
+- A sheet with no athletes in it can never replace one that has athletes in it, on any device.
+- Every few minutes while you work — and right before anything is overwritten — a snapshot is saved in your Supabase table (rows whose id contains `::bk::`).
+- In the **Athlete spots** panel, open **Backups & restore** to see the saved snapshots (with how many spots were filled in each) and restore any of them with two taps.
+- Redeploying the site never touches your data; it lives in Supabase, not in the site files.

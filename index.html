@@ -332,6 +332,7 @@ var SUPABASE_URL = "https://lgsxcrlwoitdflgnvixb.supabase.co";       // e.g. "ht
 var SUPABASE_ANON_KEY = "sb_publishable_76bULGIYTQyEIecAe0hrsA_vwnihOKh";  // publishable (public) key
 var SYNC_ROW_ID = "ducks-2026-2027"; // one shared sheet for this team
 
+var fbLoaded = false;   // no uploads until the first load from the shared sheet has finished
 var sb = null, fbReady = false, fbWriteTimer = null, fbLastPushedJSON = null, fbApplyingRemote = false;
 
 function setSyncBadge(mode){
@@ -347,10 +348,26 @@ function setSyncBadge(mode){
 function syncSnapshot(){
   return { data: state.data, uid: state.uid, teamName: state.teamName, teamSize: state.teamSize };
 }
-function hasContent(v){   // true if there is any real entry (a non-empty list) anywhere in the data
-  if(Array.isArray(v)) return v.length>0;
-  if(v && typeof v==="object") return Object.keys(v).some(function(k){ return hasContent(v[k]); });
-  return false;
+/* How many athlete-name slots are filled anywhere in the data. This is the real
+   measure of "has work in it" — the empty default cards/skeleton don't count. */
+function nameCount(v){
+  if(typeof v==="string") return ATHLETES.indexOf(v)>=0 ? 1 : 0;
+  if(Array.isArray(v)) return v.reduce(function(n,x){ return n+nameCount(x); },0);
+  if(v && typeof v==="object") return Object.keys(v).reduce(function(n,k){ return n+nameCount(v[k]); },0);
+  return 0;
+}
+function hasContent(v){ return nameCount(v)>0; }
+function fmtWhen(iso){ try{ return new Date(iso).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); }catch(e){ return iso||""; } }
+/* Server-side history: every so often (and before anything is overwritten) a
+   snapshot is stored as its own row, so nothing can be lost for good. */
+var lastServerBackupAt = 0;
+function serverBackup(payload, tag, force){
+  if(!sb || !payload || nameCount(payload.data)===0) return;
+  var now = Date.now();
+  if(!force && now-lastServerBackupAt < 180000) return;
+  lastServerBackupAt = now;
+  sb.from("team_sheets").insert({ id: SYNC_ROW_ID+"::bk::"+new Date().toISOString()+"::"+tag, payload: payload, updated_at: new Date().toISOString() })
+    .then(function(res){ if(res.error) console.warn("Backup failed:", res.error); });
 }
 var recentPushed = [];   // our own recent writes, so their echoes coming back are ignored
 function syncKey(p){ return JSON.stringify({data:p.data||{}, teamSize:p.teamSize||{}, teamName:p.teamName||""}); }
@@ -359,7 +376,10 @@ function applyRemote(p){
   var incoming = syncKey(p);
   if(incoming === syncKey(state)) return;           // nothing new
   if(recentPushed.indexOf(incoming) !== -1) return; // our own older write echoing back
+  // A shared copy with NO athletes in it never replaces a device that has athletes in it.
+  if(nameCount(p.data)===0 && nameCount(state.data)>0){ fbPush(true); return; }
   // Safety net: keep a copy of this device's own data before a remote copy replaces it.
+  if(nameCount(state.data)>0) serverBackup(syncSnapshot(), "before-overwrite", true);
   try{ if(hasContent(state.data)) localStorage.setItem("acroScoreBuilder_backupBeforeSync", JSON.stringify({savedAt:new Date().toISOString(), data:state.data, uid:state.uid, teamName:state.teamName, teamSize:state.teamSize})); }catch(e){}
   fbApplyingRemote = true;
   state.data = p.data || {};
@@ -381,6 +401,7 @@ function fbInit(){
     sb.from("team_sheets").select("payload").eq("id", SYNC_ROW_ID).maybeSingle().then(function(res){
       if(res.error){ console.warn("Sync load failed:", res.error); setSyncBadge("err"); return; }
       fbReady = true;
+      fbLoaded = true;
       if(res.data && res.data.payload){
         applyRemote(res.data.payload);
       } else if(hasContent(state.data)){
@@ -404,15 +425,56 @@ function fbInit(){
 }
 
 function fbPush(immediate){
-  if(!sb || fbApplyingRemote) return;
-  if(!hasContent(state.data)) return;   // never upload an empty sheet over a shared one
+  if(!sb || fbApplyingRemote || !fbLoaded) return;
+  if(!hasContent(state.data)) return;   // never upload a sheet with no athletes over a shared one
   clearTimeout(fbWriteTimer);
   fbWriteTimer = setTimeout(function(){
     var payload = syncSnapshot();
     recentPushed.push(syncKey(payload)); if(recentPushed.length>10) recentPushed.shift();
+    serverBackup(payload, "auto", false);
     sb.from("team_sheets").upsert({ id: SYNC_ROW_ID, payload: payload, updated_at: new Date().toISOString() })
       .then(function(res){ if(res.error){ console.warn("Sync push failed:", res.error); setSyncBadge("err"); } });
   }, immediate ? 0 : 500);
+}
+
+/* ---- Backups & restore (shown at the bottom of the Athlete spots panel) ---- */
+var backupsOpen = false, backupList = null, restoreArmed = null;
+function loadBackups(){
+  var out = [];
+  try{
+    var raw = localStorage.getItem("acroScoreBuilder_backupBeforeSync");
+    if(raw){ var b = JSON.parse(raw); out.push({key:"local", label:"Saved on this device before the last sync", when:b.savedAt, payload:b, names:nameCount(b.data)}); }
+  }catch(e){}
+  if(!sb){ backupList = out; renderUsage(); return; }
+  sb.from("team_sheets").select("id,payload,updated_at").like("id", SYNC_ROW_ID+"::bk::%").order("updated_at",{ascending:false}).limit(15).then(function(res){
+    (res.data||[]).forEach(function(r){ out.push({key:r.id, label:"Automatic backup", when:r.updated_at, payload:r.payload, names:nameCount(r.payload && r.payload.data)}); });
+    backupList = out; renderUsage();
+  });
+}
+function restoreBackup(item){
+  serverBackup(syncSnapshot(), "before-restore", true);
+  var p = item.payload;
+  state.data = p.data || {}; state.uid = Math.max(state.uid||1, p.uid||1);
+  state.teamName = p.teamName || state.teamName; state.teamSize = p.teamSize || state.teamSize || {};
+  save(); fbPush(true); renderAll();
+}
+function renderBackups(box){
+  var wrap = el("div",{style:"margin-top:12px; border-top:1px solid var(--border); padding-top:10px;"});
+  wrap.appendChild(el("button",{class:"usagehead", type:"button", onclick:function(){ backupsOpen=!backupsOpen; restoreArmed=null; if(backupsOpen) loadBackups(); else renderUsage(); }},[
+    el("h2",{style:"font-size:13px;"},["Backups & restore"]), el("span",{class:"usagechev"},[backupsOpen?"▾ Hide":"▸ Show"])
+  ]));
+  if(backupsOpen){
+    if(backupList===null) wrap.appendChild(el("div",{class:"uempty"},["Loading…"]));
+    else if(!backupList.length) wrap.appendChild(el("div",{class:"uempty"},["No backups yet. They are saved automatically while you work."]));
+    else backupList.forEach(function(it){
+      var armed = restoreArmed===it.key;
+      wrap.appendChild(el("div",{style:"display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--border);"},[
+        el("div",{style:"flex:1; min-width:0; font-size:12.5px;"},[ el("div",{style:"font-weight:600;"},[fmtWhen(it.when)+" — "+it.names+" spots filled"]), el("div",{style:"color:var(--fg-dim);"},[it.label]) ]),
+        el("button",{class:"ghostbtn", type:"button", onclick:function(){ if(armed){ restoreArmed=null; restoreBackup(it); } else { restoreArmed=it.key; renderUsage(); } }},[armed?"Tap again":"Restore"])
+      ]));
+    });
+  }
+  box.appendChild(wrap);
 }
 
 /* ================= Simple team access code =================
@@ -1990,6 +2052,7 @@ function renderUsage(){
     }
     box.appendChild(item);
   });
+  if(typeof renderBackups==="function") renderBackups(box);
 }
 function renderTeam(){ var app=document.getElementById("app"); app.innerHTML=""; viewTeam(app); }
 function renderAll(){
