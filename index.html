@@ -632,6 +632,9 @@ var STANDING_TUMBLE = {
      [10.0,"Cartwheel → 1.5 twist"],[10.0,"Aerial → back full twist"],[10.0,"Aerial → back handspring → 1.5 twist"],
      [10.0,"Standing full"],[10.0,"Standing arabian"]]
 };
+/* Front step-out skills are always followed by a Round Off. That Round Off is NOT a transition
+   and NOT a dismount - it is worth 0 and the pass continues into a real transition/dismount. */
+var FRONT_STEPOUT = ["Front Handspring Step Out","Front Full Step Out"];
 var RUN_ENTRY = {"Round Off":0.1,"Front Handspring Step Out":0.2,"Front Handspring":0.3,"Front or Step Out":0.5,"Barani":0.5,"Front Full Step Out":0.6};
 var RUN_TRANS = {"Round Off":0.1,"Back Handspring":0.2,"Front Handspring Step Out":0.3,"Front Handspring":0.4,"Back Half":0.5,
   "Whip":0.6,"Front Tuck":0.7,"Arabian":0.8,"Whip Full":0.9,"Back 1.5 Step Out":1.0,"Front Full Step Out":1.1,"Back 1.5 Twist":1.2,"Front Full":1.3};
@@ -1133,12 +1136,20 @@ function tumblePassCard(rec, level, onRemove, title, onUpdate, hideRoles){
       r2.appendChild(field("Transition 2", selectEl(["(none)"].concat(Object.keys(RUN_TRANS)), rec.t2, function(v){ rec.t2=v; render(); save(); })));
       r2.appendChild(field("Dismount", selectEl(Object.keys(RUN_DISMOUNT), rec.dismount, function(v){ rec.dismount=v; render(); save(); })));
       card.appendChild(r2);
+      var hasFrontStepOut = FRONT_STEPOUT.indexOf(rec.entry)>=0 || FRONT_STEPOUT.indexOf(rec.t1)>=0 || FRONT_STEPOUT.indexOf(rec.t2)>=0;
       var t1v = rec.t1!=="(none)" ? RUN_TRANS[rec.t1] : 0;
       var t2v = rec.t2!=="(none)" ? RUN_TRANS[rec.t2] : 0;
-      var doubled = rec.t2!=="(none)" && RUN_DISMOUNT[rec.dismount] >= 0.3; // 2nd transition into flipping dismount counts double
-      if(doubled) t2v = t2v*2;
+      var roundOffNote = "";
+      if(hasFrontStepOut){
+        // the Round Off after a front step-out is automatic: it never counts as a transition
+        if(rec.t1==="Round Off") t1v = 0;
+        if(rec.t2==="Round Off") t2v = 0;
+        roundOffNote = "Front step-out in this pass: the Round Off that follows is not a transition or dismount (worth 0). You still get 2 transitions.";
+      }
+      t2v = Math.round(t2v*2*100)/100;   // second transition always counts double
       val = RUN_ENTRY[rec.entry] + t1v + t2v + RUN_DISMOUNT[rec.dismount];
-      card.appendChild(el("div",{class:"breakdown"},["Entry "+RUN_ENTRY[rec.entry]+" + T1 "+t1v+" + T2 "+t2v+(doubled?" (doubled)":"")+" + Dismount "+RUN_DISMOUNT[rec.dismount]]));
+      if(roundOffNote) card.appendChild(el("div",{class:"hint", style:"margin-top:8px;"},[roundOffNote]));
+      card.appendChild(el("div",{class:"breakdown"},["Entry "+RUN_ENTRY[rec.entry]+" + T1 "+t1v+" + T2 "+t2v+(rec.t2!=="(none)"?" (doubled)":"")+" + Dismount "+RUN_DISMOUNT[rec.dismount]]));
     }
     } // end !rec.custom
     if(!hideRoles){
