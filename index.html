@@ -143,6 +143,13 @@ select, input[type=text], input[type=number]{
 }
 .scoreline .val{font-size:19px; font-weight:700; color:var(--fg);}
 .scoreline .lbl{font-size:12px; color:var(--fg-dim);}
+.startvalue{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px;
+  padding:9px 14px; border-radius:8px; background:var(--accent); color:var(--accent-fg);
+}
+.startvalue .sv-lbl{font-size:11.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;}
+.startvalue .sv-note{font-size:12px; opacity:.92;}
+.startvalue .sv-big{font-family:var(--font-mono); font-size:24px; font-weight:700;}
 .breakdown{font-size:11.5px; color:var(--fg-dim); font-family:var(--font-mono); margin-top:4px;}
 
 .totalbar{
@@ -528,6 +535,29 @@ var COMPULSORY = {
 };
 
 var OPT_BASE = {3:{Acro:9.2,Pyramid:9.4},4:{Acro:8.8,Pyramid:8.8}};
+/* Every optional skill is capped at a 10.0 start value. Acro/Pyramid: base + the points
+   earned, max 10.0. Toss has no base (its value is the whole-skill value, max 10.0).
+   The category start value is the AVERAGE of its skills' start values. */
+function optStart(cat, lvl, rec){
+  var base = (cat==="Toss") ? 0 : OPT_BASE[lvl][cat];
+  return Math.min(10, Math.round((base + ((rec && rec._value)||0))*100)/100);
+}
+function optAvg(cat, lvl, recs){
+  recs = recs || [];
+  if(!recs.length) return 0;
+  var sum = 0; recs.forEach(function(r){ sum += optStart(cat, lvl, r); });
+  return Math.round(sum/recs.length*100)/100;
+}
+function startValueLine(cat, lvl, rec){
+  var base = (cat==="Toss") ? 0 : OPT_BASE[lvl][cat];
+  var v = (rec && rec._value)||0, raw = Math.round((base+v)*100)/100, sv = optStart(cat, lvl, rec);
+  var note = base>0 ? (base.toFixed(1)+" base + "+v.toFixed(1)+" = "+raw.toFixed(1)) : ("whole-skill value "+v.toFixed(1));
+  if(raw>10) note += " → capped at 10.0";
+  return el("div",{class:"startvalue"},[
+    el("div",{},[ el("div",{class:"sv-lbl"},["Start value"]), el("div",{class:"sv-note"},[note]) ]),
+    el("div",{class:"sv-big"},[sv.toFixed(2)])
+  ]);
+}
 var OPT_ELEMENTS = {3:4,4:5};
 var TEAM_REQ = {
   3:{Acro:{n:3,synced:1,base:9.2},Pyramid:{n:2,synced:0,base:9.4},Toss:{n:3,synced:1,base:null},
@@ -1241,48 +1271,54 @@ function viewOptional(container){
   bucket.acro = bucket.acro || [];
   while(bucket.acro.length < OPT_ELEMENTS[lvl]) bucket.acro.push({});
   var acroWrap = el("div",{});
-  var acroTotal = OPT_BASE[lvl].Acro;
+  var acroTotal = 0, acroN = 0;
   bucket.acro.slice(0, OPT_ELEMENTS[lvl]).forEach(function(rec, i){
     var c = acroSkillCard(rec, null, "Element "+(i+1), refreshOptional);
     addDragHandle(c);
+    c.appendChild(startValueLine("Acro", lvl, rec));
     acroWrap.appendChild(c);
-    acroTotal += rec._value||0;
+    acroTotal += optStart("Acro", lvl, rec); acroN++;
   });
   container.appendChild(acroWrap);
   enableDragReorder(acroWrap, ".card", function(from,to){
     var moved = bucket.acro.splice(from,1)[0]; bucket.acro.splice(to,0,moved);
     save(); refreshOptional();
   });
-  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Acro optional score"]), el("span",{class:"big"},[acroTotal.toFixed(2)]) ]));
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Acro optional start value — average of "+acroN+" elements"]), el("span",{class:"big"},[(acroN?Math.round(acroTotal/acroN*100)/100:0).toFixed(2)]) ]));
 
   // Pyramid
   container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Pyramid — Optional"]), el("span",{class:"req"},["2 pyramids · base "+OPT_BASE[lvl].Pyramid.toFixed(1)]) ]));
   bucket.pyramid = bucket.pyramid || [];
   while(bucket.pyramid.length < 2) bucket.pyramid.push({});
   var pyrWrap = el("div",{});
-  var pyrTotal = OPT_BASE[lvl].Pyramid;
+  var pyrTotal = 0, pyrN = 0;
   bucket.pyramid.slice(0,2).forEach(function(rec,i){
     var c = pyramidSkillCard(rec, lvl, null, "Pyramid "+(i+1), refreshOptional);
     addDragHandle(c);
+    c.appendChild(startValueLine("Pyramid", lvl, rec));
     pyrWrap.appendChild(c);
-    pyrTotal += rec._value||0;
+    pyrTotal += optStart("Pyramid", lvl, rec); pyrN++;
   });
   container.appendChild(pyrWrap);
   enableDragReorder(pyrWrap, ".card", function(from,to){
     var moved = bucket.pyramid.splice(from,1)[0]; bucket.pyramid.splice(to,0,moved);
     save(); refreshOptional();
   });
-  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Pyramid optional score"]), el("span",{class:"big"},[pyrTotal.toFixed(2)]) ]));
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Pyramid optional start value — average of "+pyrN+" pyramids"]), el("span",{class:"big"},[(pyrN?Math.round(pyrTotal/pyrN*100)/100:0).toFixed(2)]) ]));
 
   // Toss — exactly one synced + one solo slot (the two required categories, not reorderable)
-  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced + 1 solo · whole-skill, no base SV"]) ]));
+  container.appendChild(el("div",{class:"sectiontitle"},[ el("span",{},["Toss — Optional"]), el("span",{class:"req"},["1 synced + 1 solo · whole-skill value, max 10.0"]) ]));
   bucket.toss = bucket.toss || {};
   bucket.toss.synced = bucket.toss.synced || {};
   bucket.toss.solo = bucket.toss.solo || {};
-  container.appendChild(tossSkillCard(bucket.toss.synced, lvl, null, "Synced Toss", refreshOptional));
-  container.appendChild(tossSkillCard(bucket.toss.solo, lvl, null, "Solo Toss", refreshOptional));
-  var tossTotal = (bucket.toss.synced._value||0) + (bucket.toss.solo._value||0);
-  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Toss optional score"]), el("span",{class:"big"},[tossTotal.toFixed(2)]) ]));
+  var syncCard = tossSkillCard(bucket.toss.synced, lvl, null, "Synced Toss", refreshOptional);
+  syncCard.appendChild(startValueLine("Toss", lvl, bucket.toss.synced));
+  container.appendChild(syncCard);
+  var soloCard = tossSkillCard(bucket.toss.solo, lvl, null, "Solo Toss", refreshOptional);
+  soloCard.appendChild(startValueLine("Toss", lvl, bucket.toss.solo));
+  container.appendChild(soloCard);
+  var tossTotal = optAvg("Toss", lvl, [bucket.toss.synced, bucket.toss.solo]);
+  container.appendChild(el("div",{class:"totalbar"},[ el("span",{class:"lbl"},["Toss optional start value — average of synced + solo"]), el("span",{class:"big"},[tossTotal.toFixed(2)]) ]));
 
   // Tumbling
   var req = TUMBLE_OPT[lvl];
@@ -1509,20 +1545,20 @@ function buildExportText(){
   if(o){
     lines.push("\n\nOPTIONAL");
     if(o.acro){
-      var at = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ at += r._value||0; });
-      lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" → total "+at.toFixed(2));
-      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(skillDesc(r) || (r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:""))+" → +"+(r._value||0).toFixed(1)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base(s)")+" "+roleExport(r,"flyer","Flyer")); });
+      var at = optAvg("Acro", lvl, o.acro);
+      lines.push("\nAcro — base "+OPT_BASE[lvl].Acro.toFixed(1)+" · start value (average of "+o.acro.length+" elements, each max 10.0) = "+at.toFixed(2));
+      o.acro.forEach(function(r,i){ lines.push("  Element "+(i+1)+": "+(skillDesc(r) || (r.family||"")+", entry "+r.entry+" / top "+r.top+(r.dismount?" / dismount "+r.dismount:""))+" → start "+optStart("Acro",lvl,r).toFixed(2)+"   "+roleExport(r,"sideBase","Side Base")+" "+roleExport(r,"frontBase","Front Base")+" "+roleExport(r,"backBase","Back Base(s)")+" "+roleExport(r,"flyer","Flyer")); });
     }
     if(o.pyramid){
-      var pt = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pt += r._value||0; });
-      lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" → total "+pt.toFixed(2));
-      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+(skillDesc(r) || r.skill+" (letter "+r.letter+")")+" → +"+(r._value||0).toFixed(1)+"   "+pyramidRoleExportLine(r)); });
+      var pt = optAvg("Pyramid", lvl, o.pyramid);
+      lines.push("\nPyramid — base "+OPT_BASE[lvl].Pyramid.toFixed(1)+" · start value (average of "+o.pyramid.length+" pyramids, each max 10.0) = "+pt.toFixed(2));
+      o.pyramid.forEach(function(r,i){ lines.push("  Pyramid "+(i+1)+": "+(skillDesc(r) || r.skill+" (letter "+r.letter+")")+" → start "+optStart("Pyramid",lvl,r).toFixed(2)+"   "+pyramidRoleExportLine(r)); });
     }
     if(o.toss){
-      var tt = (o.toss.synced._value||0)+(o.toss.solo._value||0);
-      lines.push("\nToss — total "+tt.toFixed(2));
-      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+(o.toss.synced._value||0).toFixed(1)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base(s)")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
-      lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+(o.toss.solo._value||0).toFixed(1)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base(s)")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
+      var tt = optAvg("Toss", lvl, [o.toss.synced, o.toss.solo]);
+      lines.push("\nToss — start value (average of synced + solo, each max 10.0) = "+tt.toFixed(2));
+      lines.push("  Synced: "+(skillDesc(o.toss.synced) || o.toss.synced.skill)+" ("+optStart("Toss",lvl,o.toss.synced).toFixed(2)+")   "+roleExport(o.toss.synced,"sideBase","Side Base")+" "+roleExport(o.toss.synced,"frontBase","Front Base")+" "+roleExport(o.toss.synced,"backBase","Back Base(s)")+" "+roleExport(o.toss.synced,"flyer","Flyer"));
+      lines.push("  Solo: "+(skillDesc(o.toss.solo) || o.toss.solo.skill)+" ("+optStart("Toss",lvl,o.toss.solo).toFixed(2)+")   "+roleExport(o.toss.solo,"sideBase","Side Base")+" "+roleExport(o.toss.solo,"frontBase","Front Base")+" "+roleExport(o.toss.solo,"backBase","Back Base(s)")+" "+roleExport(o.toss.solo,"flyer","Flyer"));
     }
     if(o.tumbling){
       var sum=0; o.tumbling.forEach(function(r){ sum+= r._value||0; });
@@ -1616,28 +1652,28 @@ function viewJudges(container){
   if(o.acro && o.acro.length){
     var acroRows = o.acro.map(function(r){
       var names = instanceNames(r).join(", ");
-      return {text: skillLabelFor("Acro", r) + (names?" ("+names+")":"") + "  "+(r._value||0).toFixed(2)};
+      return {text: skillLabelFor("Acro", r) + (names?" ("+names+")":"") + "  "+optStart("Acro",lvl,r).toFixed(2)};
     });
-    var acroTotal = OPT_BASE[lvl].Acro; o.acro.forEach(function(r){ acroTotal += r._value||0; });
+    var acroTotal = optAvg("Acro", lvl, o.acro);
     acroRows.push({text:"START VALUE "+acroTotal.toFixed(2), score:true});
     wrap.appendChild(judgeBlock("ACRO SKILLS ("+o.acro.length+")", acroRows));
   }
   if(o.pyramid && o.pyramid.length){
     var pyrRows = o.pyramid.map(function(r){
       var names = instanceNames(r).join(", ");
-      return {text: skillLabelFor("Pyramid", r) + (names?" ("+names+")":"") + "  "+(r._value||0).toFixed(2)};
+      return {text: skillLabelFor("Pyramid", r) + (names?" ("+names+")":"") + "  "+optStart("Pyramid",lvl,r).toFixed(2)};
     });
-    var pyrTotal = OPT_BASE[lvl].Pyramid; o.pyramid.forEach(function(r){ pyrTotal += r._value||0; });
+    var pyrTotal = optAvg("Pyramid", lvl, o.pyramid);
     pyrRows.push({text:"START VALUE "+pyrTotal.toFixed(2), score:true});
     wrap.appendChild(judgeBlock("PYRAMID ("+o.pyramid.length+")", pyrRows));
   }
   if(o.toss && o.toss.synced){
     var sNames = instanceNames(o.toss.synced).join(", "), oNames = instanceNames(o.toss.solo).join(", ");
     var tossRows = [
-      {text: skillLabelFor("Toss", o.toss.synced)+" (sync)"+(sNames?" ("+sNames+")":"")+"  "+(o.toss.synced._value||0).toFixed(2)},
-      {text: skillLabelFor("Toss", o.toss.solo)+" (solo)"+(oNames?" ("+oNames+")":"")+"  "+(o.toss.solo._value||0).toFixed(2)}
+      {text: skillLabelFor("Toss", o.toss.synced)+" (sync)"+(sNames?" ("+sNames+")":"")+"  "+optStart("Toss",lvl,o.toss.synced).toFixed(2)},
+      {text: skillLabelFor("Toss", o.toss.solo)+" (solo)"+(oNames?" ("+oNames+")":"")+"  "+optStart("Toss",lvl,o.toss.solo).toFixed(2)}
     ];
-    var tossTotal = (o.toss.synced._value||0)+(o.toss.solo._value||0);
+    var tossTotal = optAvg("Toss", lvl, [o.toss.synced, o.toss.solo]);
     tossRows.push({text:"START VALUE "+tossTotal.toFixed(2), score:true});
     wrap.appendChild(judgeBlock("TOSS (1 SYNC / 1 SOLO)", tossRows));
   }
